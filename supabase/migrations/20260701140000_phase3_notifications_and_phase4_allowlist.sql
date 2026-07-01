@@ -43,10 +43,10 @@ DROP POLICY IF EXISTS "read allowed_users" ON public.allowed_users;
 CREATE POLICY "read allowed_users" ON public.allowed_users
   FOR SELECT TO authenticated USING (true);
 
--- Seed the two production accounts.
+-- Seed the two production accounts (real emails).
 INSERT INTO public.allowed_users (user_id, role, email) VALUES
-  ('33eeddae-82ed-4179-92b0-380a32f7032a', 'researcher', 'researcher@acadarchiv.test'),
-  ('cde13f51-011c-4d69-be00-288c5a189a02', 'supervisor', 'supervisor@acadarchiv.test')
+  ('e8fbafaa-5624-4791-8e56-f9d48902185a', 'researcher', 'loisrylee95@gmail.com'),
+  ('070bb4d9-9936-4efd-bd3c-83debff5077a', 'supervisor', 'thanoon76@uomosul.edu.iq')
 ON CONFLICT (user_id) DO UPDATE
   SET role = EXCLUDED.role, email = EXCLUDED.email;
 
