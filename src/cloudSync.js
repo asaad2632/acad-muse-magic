@@ -304,18 +304,62 @@ export async function syncLibrary(libraryArr) {
 
 // Direct per-row writes (Phase 3b hardening — used by My Library UI so data
 // lands in library_sources immediately without waiting for debounce).
+//
+// Hardened Jan-2026:
+//   1. Retry with exponential backoff (500ms/2s/5s) for transient failures.
+//   2. Error classification so the UI can distinguish permanent auth/RLS
+//      failures from transient network issues.
+//   3. INSERT-then-UPDATE fallback instead of relying on `.upsert()` —
+//      because the historical partial unique index
+//      (`... WHERE client_id IS NOT NULL`) does NOT satisfy PostgREST's
+//      ON CONFLICT requirement, so upsert was silently failing with
+//      42P10 for every library upload. This path works with or without
+//      a schema-level unique constraint.
+function classifyError(error, status) {
+  if (!error) return null;
+  const msg = String(error.message || error || "").toLowerCase();
+  const code = error.code || "";
+  if (code === "42501" || status === 403 || msg.includes("row-level security")) return "rls";
+  if (status === 401 || msg.includes("jwt") || msg.includes("expired") || msg.includes("invalid token")) return "jwt";
+  if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout") || msg.includes("aborted")) return "network";
+  return "unknown";
+}
+
+async function _writeLibraryRowWithRetry(userId, row) {
+  const delays = [500, 2000, 5000];
+  let lastError = null, lastStatus = null;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    // 1st path: try INSERT.
+    let { error, status } = await supabase.from("library_sources").insert(row);
+    if (!error) return { error: null, errorType: null, path: "insert", attempts: attempt + 1 };
+    // Duplicate key → row exists, fall back to UPDATE.
+    if (error.code === "23505" || status === 409) {
+      const upd = await supabase
+        .from("library_sources").update(row)
+        .eq("user_id", userId).eq("client_id", row.client_id);
+      if (!upd.error) return { error: null, errorType: null, path: "update", attempts: attempt + 1 };
+      error = upd.error; status = upd.status;
+    }
+    lastError = error; lastStatus = status;
+    const type = classifyError(error, status);
+    console.warn(`[insertLibraryRow attempt ${attempt + 1}/${delays.length + 1}] type=${type}`, error);
+    // Permanent errors — don't retry.
+    if (type === "rls" || type === "jwt") break;
+    if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
+  }
+  return { error: lastError, errorType: classifyError(lastError, lastStatus), attempts: delays.length + 1 };
+}
+
 export async function insertLibraryRow(src) {
   const userId = await uid();
-  if (!userId) return { error: new Error("no-user") };
+  if (!userId) return { error: new Error("no-user"), errorType: "no-user" };
   const row = libToRow(src, userId);
-  const { error } = await supabase.from("library_sources").upsert(row, { onConflict: "user_id,client_id" });
-  if (error) console.warn("[insertLibraryRow]", error);
-  return { error };
+  return _writeLibraryRowWithRetry(userId, row);
 }
 
 export async function updateLibraryRow(clientId, changes) {
   const userId = await uid();
-  if (!userId) return { error: new Error("no-user") };
+  if (!userId) return { error: new Error("no-user"), errorType: "no-user" };
   // Build a partial row using libToRow mapping, then keep only fields present in `changes`.
   const full = libToRow({ id: clientId, ...changes }, userId);
   const patch = {};
@@ -331,13 +375,22 @@ export async function updateLibraryRow(clientId, changes) {
     if (map[k]) patch[map[k]] = full[map[k]];
   }
   patch.updated_at = new Date().toISOString();
-  const { error } = await supabase
-    .from("library_sources")
-    .update(patch)
-    .eq("user_id", userId)
-    .eq("client_id", String(clientId));
-  if (error) console.warn("[updateLibraryRow]", error);
-  return { error };
+  const delays = [500, 2000, 5000];
+  let lastError = null, lastStatus = null;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    const { error, status } = await supabase
+      .from("library_sources")
+      .update(patch)
+      .eq("user_id", userId)
+      .eq("client_id", String(clientId));
+    if (!error) return { error: null, errorType: null };
+    lastError = error; lastStatus = status;
+    const type = classifyError(error, status);
+    console.warn(`[updateLibraryRow attempt ${attempt + 1}/${delays.length + 1}] type=${type}`, error);
+    if (type === "rls" || type === "jwt") break;
+    if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
+  }
+  return { error: lastError, errorType: classifyError(lastError, lastStatus) };
 }
 
 export async function deleteLibraryRow(clientId) {

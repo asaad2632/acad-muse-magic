@@ -495,19 +495,7 @@ export default function App() {
     syncDeletedDebounced(deletedBaseDocs);
   }, [deletedBaseDocs, syncDeletedDebounced]);
 
-  // Phase 3b: load library from cloud once on mount
-  React.useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const items = await loadLibrary();
-        if (cancelled) return;
-        if (items && items.length) setLibrary(items);
-      } catch (e) { console.warn("[loadLibrary]", e); }
-      finally { libHydratedRef.current = true; }
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  // Phase 3b: load library from cloud once on mount (moved below after state declaration)
 
   // ===== Phase 3c: bibliography / cards / translations / custom_formats =====
   const bibHydratedRef = useRef(false);
@@ -795,7 +783,138 @@ export default function App() {
   };
 
   // ===== مكتبتي البحثية (Phase 3b — cloud-backed via library_sources) =====
-  const [library, setLibrary] = useState([]);
+  // Safety net (Jan-2026): localStorage mirror so a failed cloud save never
+  // loses the source. On load we hydrate FROM LS first, then from cloud,
+  // then reconcile any LS items still missing in cloud by re-inserting them.
+  const LIB_LS_KEY = "acadarchiv_library";
+  const readLibLS = () => {
+    if (typeof window === "undefined") return [];
+    try { const v = window.localStorage.getItem(LIB_LS_KEY); return v && v !== "undefined" ? JSON.parse(v) : []; } catch { return []; }
+  };
+  const [library, setLibrary] = useState(() => readLibLS());
+  // IDs (client_id / src.id) that are known to have failed cloud upsert and
+  // need retry. Populated by handleLibFileUpload/handleLibUrlImport when
+  // insertLibraryRow returns an error, and by the load-time reconciliation.
+  const [pendingLibIds, setPendingLibIds] = useState(() => new Set());
+  // One-time-per-session flag: shows a diagnostic toast the first time a
+  // library save fails, revealing the exact error class (rls/jwt/network).
+  const libDiagShownRef = useRef(false);
+
+  // Phase 3b: load library from cloud once on mount + reconcile LS mirror
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const items = await loadLibrary();
+        if (cancelled) return;
+        if (items && items.length) {
+          // Reconcile: any LS item whose id isn't in cloud results is a
+          // pending unsaved source — keep it in state and mark pending.
+          const cloudIds = new Set(items.map(x => String(x.id)));
+          const lsOnly = readLibLS().filter(x => !cloudIds.has(String(x.id)));
+          if (lsOnly.length) {
+            console.info(`[library.reconcile] ${lsOnly.length} local source(s) missing from cloud — will retry.`);
+            setPendingLibIds(prev => {
+              const next = new Set(prev);
+              lsOnly.forEach(x => next.add(String(x.id)));
+              return next;
+            });
+          }
+          setLibrary([...lsOnly, ...items]);
+        }
+        // If cloud returned nothing but LS has items, keep them and mark all pending.
+        else {
+          const lsItems = readLibLS();
+          if (lsItems.length) {
+            console.info(`[library.reconcile] cloud empty, ${lsItems.length} local source(s) will be retried.`);
+            setPendingLibIds(prev => {
+              const next = new Set(prev);
+              lsItems.forEach(x => next.add(String(x.id)));
+              return next;
+            });
+          }
+        }
+      } catch (e) { console.warn("[loadLibrary]", e); }
+      finally { libHydratedRef.current = true; }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist library to localStorage on every change (safety net against
+  // cloud-save failures). Runs synchronously — no debounce needed because
+  // localStorage writes are non-blocking for our data sizes.
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      // Strip base64 file bodies before persisting to avoid quota errors —
+      // fileData is only used transiently for AI analysis. If the app
+      // reloads before analysis completes, the source is preserved with
+      // metadata; only the AI-analysis retry loses the raw bytes.
+      const stripped = library.map(s => {
+        const { fileData, ...rest } = s;
+        // Keep short text (< 200KB) but drop huge blobs.
+        return typeof fileData === "string" && fileData.length < 200000
+          ? { ...rest, fileData }
+          : rest;
+      });
+      window.localStorage.setItem(LIB_LS_KEY, JSON.stringify(stripped));
+    } catch (e) { console.warn("[library.LS.write]", e); }
+  }, [library]);
+
+  // Show a one-time diagnostic toast the FIRST time a library save fails,
+  // classifying the underlying cause (RLS 403 / JWT 401 / network / unknown).
+  const showLibDiagIfNeeded = React.useCallback((errorType) => {
+    if (libDiagShownRef.current || !errorType) return;
+    libDiagShownRef.current = true;
+    const labels = {
+      rls: "🔒 RLS 403 — سياسة الأمان رفضت الكتابة. تحقق أن حسابك في قائمة allowed_users.",
+      jwt: "🔑 JWT 401 — جلستك انتهت. سجّل خروج ودخول مرة أخرى.",
+      network: "🌐 خطأ شبكة — الاتصال بـ Supabase فشل. سيُعاد المحاولة تلقائياً.",
+      "no-user": "⚠️ لا توجد جلسة نشطة — سجّل الدخول أولاً.",
+      unknown: "⚠️ خطأ غير معروف — الملف محفوظ محلياً وستتم إعادة المزامنة.",
+    };
+    showNotif(`[تشخيص أولي] ${labels[errorType] || labels.unknown}`, "warn");
+    console.error(`[library.diag] first save failure of the session — type=${errorType}`);
+  }, []);
+
+  // Retry any pending library items — reads pendingLibIds and re-issues
+  // insertLibraryRow for each. Removes IDs that succeed. Called on demand
+  // (focus, online event, and every 30s while pending is non-empty).
+  const retryPendingLibrary = React.useCallback(async () => {
+    if (pendingLibIds.size === 0) return;
+    const ids = Array.from(pendingLibIds);
+    let succeeded = [];
+    for (const id of ids) {
+      const src = library.find(s => String(s.id) === String(id));
+      if (!src) { succeeded.push(id); continue; } // gone from state → drop from pending
+      const { error, errorType } = await insertLibraryRow(src);
+      if (!error) { succeeded.push(id); }
+      else { console.warn(`[retryPendingLibrary] still failing id=${id} type=${errorType}`); showLibDiagIfNeeded(errorType); }
+    }
+    if (succeeded.length) {
+      setPendingLibIds(prev => {
+        const next = new Set(prev);
+        succeeded.forEach(id => next.delete(String(id)));
+        return next;
+      });
+      showNotif(`✅ تمت مزامنة ${succeeded.length} مصدر مُعلَّق`);
+    }
+  }, [pendingLibIds, library, showLibDiagIfNeeded]);
+
+  // Trigger retry on focus, network back online, and every 30s while pending.
+  React.useEffect(() => {
+    if (pendingLibIds.size === 0) return;
+    const onlineH = () => retryPendingLibrary();
+    const focusH = () => retryPendingLibrary();
+    window.addEventListener("online", onlineH);
+    window.addEventListener("focus", focusH);
+    const t = setInterval(retryPendingLibrary, 30000);
+    return () => {
+      window.removeEventListener("online", onlineH);
+      window.removeEventListener("focus", focusH);
+      clearInterval(t);
+    };
+  }, [pendingLibIds, retryPendingLibrary]);
   const [libUploading, setLibUploading] = useState(false);
   const [libAnalyzing, setLibAnalyzing] = useState(null); // id المصدر الجاري تحليله
   const [libFilter, setLibFilter] = useState({ query:"", chapterId:"", category:"", priority:"" });
@@ -1065,9 +1184,14 @@ ${JSON.stringify(thesisStructure, null, 2)}
       };
       updateLibrary(prev => [newSrc, ...prev]);
       // Persist to Supabase immediately so the row appears in library_sources
-      // and shows up on other browsers via loadLibrary().
-      const { error: insErr } = await insertLibraryRow(newSrc);
-      if (insErr) showNotif("⚠️ فشل حفظ المصدر في السحابة", "error");
+      // and shows up on other browsers via loadLibrary(). If it fails, keep
+      // the source in local state + LS mirror and mark it pending for retry.
+      const { error: insErr, errorType: insErrType } = await insertLibraryRow(newSrc);
+      if (insErr) {
+        setPendingLibIds(prev => new Set([...prev, String(newSrc.id)]));
+        showLibDiagIfNeeded(insErrType);
+        showNotif("⚠️ فشل حفظ المصدر في السحابة — تم الحفظ محلياً وسيُعاد المحاولة", "warn");
+      }
 
       const analysis = await analyzeSource(newSrc, payload);
       const analyzed = analysis && (analysis.title || analysis.summary || analysis.chapterId)
@@ -1075,7 +1199,14 @@ ${JSON.stringify(thesisStructure, null, 2)}
         : { ...newSrc, analyzed: false, status: "فشل التحليل ⚠️ — عدّل يدوياً" };
       updateLibrary(prev => prev.map(s => s.id === srcId ? analyzed : s));
       // Upsert the analyzed version too so title/summary/keywords are stored.
-      await insertLibraryRow(analyzed);
+      const { error: insErr2, errorType: insErrType2 } = await insertLibraryRow(analyzed);
+      if (insErr2) {
+        setPendingLibIds(prev => new Set([...prev, String(analyzed.id)]));
+        showLibDiagIfNeeded(insErrType2);
+      } else {
+        // Second insert succeeded — clear pending if the first attempt had marked it.
+        setPendingLibIds(prev => { const n = new Set(prev); n.delete(String(analyzed.id)); return n; });
+      }
 
     }
     setLibUploading(false);
@@ -1104,8 +1235,12 @@ ${JSON.stringify(thesisStructure, null, 2)}
         status: "تم التحليل ✅", analyzed: true, ...parsed
       };
       setLibrary(prev => [newSrc, ...prev]);
-      const { error: insErr } = await insertLibraryRow(newSrc);
-      if (insErr) showNotif("⚠️ فشل حفظ الرابط في السحابة", "error");
+      const { error: insErr, errorType: insErrType } = await insertLibraryRow(newSrc);
+      if (insErr) {
+        setPendingLibIds(prev => new Set([...prev, String(newSrc.id)]));
+        showLibDiagIfNeeded(insErrType);
+        showNotif("⚠️ فشل حفظ الرابط في السحابة — محفوظ محلياً وسيُعاد المحاولة", "warn");
+      }
       setLibUrlInput("");
       showNotif("✅ تمت إضافة المصدر من الرابط");
     } catch {
@@ -3720,6 +3855,20 @@ ${docsContext}
               </div>
             </div>
 
+            {/* شريط حالة المزامنة — يظهر فقط إن كان هناك مصادر معلقة */}
+            {pendingLibIds.size > 0 && (
+              <div data-testid="library-pending-banner" style={{background:"#fef3c7",borderRadius:10,padding:"10px 14px",marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",border:"1px solid #fde68a"}}>
+                <div style={{fontSize:13,color:"#92400e"}}>
+                  ⏳ لديك <strong>{pendingLibIds.size}</strong> مصدر محفوظ محلياً فقط لم يصل السحابة بعد.
+                  <span style={{fontSize:11,marginRight:6,opacity:.75}}>ستُعاد المحاولة تلقائياً كل 30 ثانية وعند عودة الشبكة.</span>
+                </div>
+                <button onClick={retryPendingLibrary} data-testid="library-retry-btn"
+                  style={{padding:"6px 14px",borderRadius:6,background:"#f59e0b",color:"white",border:"none",cursor:"pointer",fontSize:12,fontWeight:700,fontFamily:"inherit"}}>
+                  🔄 إعادة المزامنة الآن
+                </button>
+              </div>
+            )}
+
             {/* شريط الرفع السريع */}
             <div style={{background:"white",borderRadius:12,padding:16,border:"2px dashed #bfdbfe",marginBottom:14,textAlign:"center",cursor:"pointer"}} onClick={()=>libFileRef.current?.click()} onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#3B82F6"}} onDragLeave={e=>e.currentTarget.style.borderColor="#bfdbfe"} onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#bfdbfe";handleLibFileUpload(e.dataTransfer.files);}}>
               <div style={{fontSize:36,marginBottom:6}}>📂</div>
@@ -3811,6 +3960,12 @@ ${docsContext}
                             <span style={{background:src.analyzed?"#f0fdf4":"#fff7ed",color:src.analyzed?"#16a34a":"#f59e0b",borderRadius:4,padding:"1px 6px",fontSize:10}}>
                               {isAnalyzing?"⏳ جاري التحليل...":src.status}
                             </span>
+                            {pendingLibIds.has(String(src.id)) && (
+                              <span data-testid="library-pending-badge" title="لم يُحفظ في السحابة بعد — ستُعاد المحاولة تلقائياً"
+                                style={{background:"#fef3c7",color:"#b45309",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700,border:"1px solid #fde68a"}}>
+                                ⏳ لم يُحفظ سحابياً
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div style={{display:"flex",gap:4,flexShrink:0}}>
