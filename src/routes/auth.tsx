@@ -4,7 +4,6 @@ import { supabase } from "@/integrations/supabase/client";
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,31 +20,16 @@ function AuthPage() {
     setLoading(true);
     setError(null);
     try {
-      if (mode === "signup") {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: window.location.origin },
-        });
-        if (error) throw error;
-        if (data.session) {
-          window.location.href = "/";
-          return;
-        }
-        setError("تم إنشاء الحساب. سجل الدخول الآن.");
-        setMode("signin");
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        console.error("[auth] signIn error:", error);
+        setError("بيانات الدخول غير صحيحة");
+        return;
+      }
+      if (data.session) {
+        window.location.href = "/";
       } else {
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) {
-          console.error("[auth] signIn error:", error);
-          setError("بيانات الدخول غير صحيحة");
-          return;
-        }
-        if (data.session) {
-          window.location.href = "/";
-        } else {
-          setError("بيانات الدخول غير صحيحة");
-        }
+        setError("بيانات الدخول غير صحيحة");
       }
     } catch (err: any) {
       console.error("[auth] unexpected:", err);
@@ -83,7 +67,7 @@ function AuthPage() {
           📚 الأرشيف الأكاديمي
         </h1>
         <p style={{ textAlign: "center", color: "#64748b", marginTop: 6, marginBottom: 24 }}>
-          {mode === "signin" ? "تسجيل الدخول" : "إنشاء حساب جديد"}
+          تسجيل الدخول
         </p>
 
         <label style={{ display: "block", fontSize: 14, color: "#334155", marginBottom: 4 }}>
@@ -143,6 +127,7 @@ function AuthPage() {
         <button
           type="submit"
           disabled={loading}
+          data-testid="auth-submit-btn"
           style={{
             width: "100%",
             padding: "12px",
@@ -156,26 +141,14 @@ function AuthPage() {
             fontFamily: "inherit",
           }}
         >
-          {loading ? "..." : mode === "signin" ? "دخول" : "إنشاء حساب"}
+          {loading ? "..." : "دخول"}
         </button>
 
-        <button
-          type="button"
-          onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(null); }}
-          style={{
-            width: "100%",
-            marginTop: 12,
-            padding: "8px",
-            background: "transparent",
-            color: "#1e3a8a",
-            border: 0,
-            cursor: "pointer",
-            fontSize: 14,
-            fontFamily: "inherit",
-          }}
-        >
-          {mode === "signin" ? "ليس لديك حساب؟ سجل الآن" : "لديك حساب؟ سجل الدخول"}
-        </button>
+        <p style={{ textAlign: "center", color: "#94a3b8", fontSize: 12, marginTop: 16, marginBottom: 0, lineHeight: 1.7 }}>
+          🔒 الوصول مقصور على الباحث والمشرف فقط.
+          <br />
+          التسجيل الذاتي غير متاح.
+        </p>
       </form>
     </div>
   );

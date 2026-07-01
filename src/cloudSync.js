@@ -726,3 +726,108 @@ export async function syncSupervisorReports(arr) {
   const userId = await uid(); if (!userId) return;
   await syncSupervisorTable("supervisor_reports", arr.map(r => rToRow(r, userId)), "created_by");
 }
+
+// ==================== Phase 3: Notification Inbox ====================
+// Tracks each user's last-read timestamp for supervisor-generated activity
+// (questions / notes / decisions / files / meetings / reports). Any row in
+// those tables that (a) is authored by someone other than the current user
+// and (b) has created_at > last_read_at is counted as "unread".
+
+const NOTIF_TABLES = [
+  { table: "supervisor_questions", ownerCol: "created_by",  type: "سؤال",   label: "سؤال جديد",     icon: "❓", tab: "questions" },
+  { table: "supervisor_notes",     ownerCol: "created_by",  type: "ملاحظة", label: "ملاحظة جديدة",  icon: "📝", tab: "notes" },
+  { table: "supervisor_decisions", ownerCol: "created_by",  type: "قرار",   label: "قرار جديد",     icon: "⚖️", tab: "decisions" },
+  { table: "supervisor_files",     ownerCol: "uploaded_by", type: "ملف",    label: "ملف مرفوع",      icon: "📎", tab: "files" },
+  { table: "supervisor_meetings",  ownerCol: "created_by",  type: "اجتماع", label: "اجتماع مسجَّل", icon: "📅", tab: "meetings" },
+  { table: "supervisor_reports",   ownerCol: "created_by",  type: "تقرير",  label: "تقرير جديد",    icon: "📊", tab: "reports" },
+];
+
+// Fetch the caller's last-read timestamp (creates row if absent).
+export async function getLastReadAt() {
+  const userId = await uid();
+  if (!userId) return null;
+  const { data } = await supabase
+    .from("notification_reads")
+    .select("last_read_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (data?.last_read_at) return data.last_read_at;
+  // No row yet — insert a baseline row at epoch so every subsequent write flows through UPDATE.
+  await supabase.from("notification_reads").upsert(
+    { user_id: userId, last_read_at: "1970-01-01T00:00:00Z" },
+    { onConflict: "user_id" }
+  );
+  return "1970-01-01T00:00:00Z";
+}
+
+// Mark all notifications as read (updates last_read_at to now()).
+export async function markAllNotificationsRead() {
+  const userId = await uid();
+  if (!userId) return;
+  const nowIso = new Date().toISOString();
+  await supabase.from("notification_reads").upsert(
+    { user_id: userId, last_read_at: nowIso },
+    { onConflict: "user_id" }
+  );
+}
+
+// Load all unread supervisor-room items authored by someone other than caller.
+// Returns { count, items: [{table, type, label, icon, tab, id, title, chapter, date, ownerId, createdAt}] }
+export async function loadNotifications({ limit = 20 } = {}) {
+  const userId = await uid();
+  if (!userId) return { count: 0, items: [] };
+  const lastRead = (await getLastReadAt()) || "1970-01-01T00:00:00Z";
+
+  const results = await Promise.all(
+    NOTIF_TABLES.map(async ({ table, ownerCol, type, label, icon, tab }) => {
+      const { data, error } = await supabase
+        .from(table)
+        .select("*")
+        .gt("created_at", lastRead)
+        .neq(ownerCol, userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) { console.warn(`[loadNotifications:${table}]`, error); return []; }
+      return (data || []).map(r => ({
+        table, type, label, icon, tab,
+        id: r.id,
+        title: r.content || r.note || r.file_name || r.subject || r.summary || label,
+        chapter: r.chapter || r.section || null,
+        date: r.date || r.upload_date || r.meeting_date || null,
+        ownerId: r[ownerCol],
+        createdAt: r.created_at,
+      }));
+    })
+  );
+
+  const items = results.flat().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, limit);
+  return { count: items.length, items };
+}
+
+
+// ==================== Phase 4: Access-control helpers ====================
+// Reads the caller's role from allowed_users. Returns:
+//   { role: 'researcher' | 'supervisor', enforced: true } — allowed
+//   { role: null, enforced: true }  — allow-list exists but this user is NOT listed → deny
+//   { role: null, enforced: false } — allowed_users table not deployed yet → do not lock (legacy)
+export async function getMyRole() {
+  const userId = await uid();
+  if (!userId) return { role: null, enforced: false };
+  const { data, error } = await supabase
+    .from("allowed_users")
+    .select("role")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) {
+    // Missing table (PGRST205) or similar infra error → treat as not-yet-enforced.
+    const code = error.code || "";
+    if (code === "PGRST205" || /not exist|relation .* does not exist/i.test(error.message || "")) {
+      console.info("[getMyRole] allow-list not deployed yet — access unrestricted.");
+      return { role: null, enforced: false };
+    }
+    console.warn("[getMyRole]", error);
+    return { role: null, enforced: false };
+  }
+  return { role: data?.role || null, enforced: true };
+}
+

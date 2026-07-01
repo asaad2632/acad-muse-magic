@@ -6,6 +6,7 @@ import {
   loadSupervisorMeetings, syncSupervisorMeetings,
   loadSupervisorDecisions, syncSupervisorDecisions,
   loadSupervisorReports, syncSupervisorReports,
+  markAllNotificationsRead,
   debounce,
 } from "@/cloudSync";
 
@@ -88,8 +89,21 @@ const btnDanger = { padding:"6px 10px", borderRadius:6, background:"#fee2e2", co
 
 const chapterLabel = (v) => (CHAPTER_OPTIONS.find(c => c.v === String(v))?.l) || v;
 
-export default function SupervisorRoom({ chapters = [], combinedDocs = [], bibliography = [], showNotif, setConfirmDialog }) {
-  const [tab, setTab] = useState("questions");
+export default function SupervisorRoom({ chapters = [], combinedDocs = [], bibliography = [], showNotif, setConfirmDialog, initialTab = null, onOpened }) {
+  const [tab, setTab] = useState(initialTab || "questions");
+
+  // When opened via a notification click, switch to the requested tab and
+  // mark all notifications as read (so the bell badge clears on next poll).
+  useEffect(() => {
+    if (initialTab) {
+      setTab(initialTab);
+      markAllNotificationsRead().catch(() => {});
+      if (onOpened) onOpened();
+    }
+    // Also mark as read whenever supervisor room is opened at all
+    markAllNotificationsRead().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTab]);
 
   // ---------- state ----------
   const [questions, setQuestions] = useState(() => loadLS(LS.questions, []));

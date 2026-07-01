@@ -3,7 +3,8 @@ import { AI_MODELS, getSelectedModel, setSelectedModel } from "./config";
 import { callLLM, analyzeDocumentLLM } from "./aiClient";
 import mammoth from "mammoth";
 import SupervisorRoom from "./SupervisorRoom";
-import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats } from "./cloudSync";
+import NotificationBell from "./NotificationBell";
+import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats, getMyRole } from "./cloudSync";
 import { supabase } from "@/integrations/supabase/client";
 
 // ============================================================
@@ -369,9 +370,24 @@ export default function App() {
   const [aiLoading, setAiLoading] = useState(false);
   const [notif, setNotif] = useState(null);
   const [userEmail, setUserEmail] = useState("");
+  const [userRole, setUserRole] = useState(null); // 'researcher' | 'supervisor' | null
+  const [accessDenied, setAccessDenied] = useState(false);
   useEffect(()=>{
     supabase.auth.getUser().then(({data})=>setUserEmail(data?.user?.email||""));
+    getMyRole().then(({ role, enforced }) => {
+      setUserRole(role);
+      // Only show the "access denied" banner once the allow-list is actually
+      // enforced (i.e. table exists) AND the user is not listed. Before the
+      // Phase 4 migration is applied we deliberately fail-open so existing
+      // sessions keep working.
+      if (enforced && !role) setAccessDenied(true);
+    });
   },[]);
+  const [supervisorTab, setSupervisorTab] = useState(null); // set by NotificationBell → passed to SupervisorRoom
+  const openSupervisorTab = useCallback((tab) => {
+    setSupervisorTab(tab);
+    setPage("supervisor");
+  }, []);
   const handleLogout = useCallback(async ()=>{
     try { await supabase.auth.signOut(); } catch(e){}
     window.location.href = "/auth";
@@ -2355,6 +2371,20 @@ ${docsContext}
 
   return (
     <div style={{fontFamily:"'Segoe UI',Tahoma,Geneva,Verdana,sans-serif",direction:"rtl",minHeight:"100vh",background:"#f1f5f9",color:"#1e293b"}}>
+      {accessDenied && (
+        <div data-testid="access-denied-banner" style={{position:"fixed",inset:0,zIndex:10001,background:"rgba(15,23,42,0.95)",display:"flex",alignItems:"center",justifyContent:"center",padding:20,direction:"rtl",fontFamily:"'Cairo',sans-serif"}}>
+          <div style={{background:"white",borderRadius:14,padding:28,maxWidth:480,width:"100%",textAlign:"center",boxShadow:"0 30px 60px rgba(0,0,0,.4)"}}>
+            <div style={{fontSize:40,marginBottom:10}}>🔒</div>
+            <div style={{fontSize:18,fontWeight:800,color:"#dc2626",marginBottom:8}}>حساب غير مخوَّل</div>
+            <div style={{fontSize:13,color:"#475569",lineHeight:1.8,marginBottom:18}}>
+              هذا الأرشيف مقفل على حسابين مُصرَّح بهما فقط (الباحث + المشرف). حسابك الحالي <strong>{userEmail}</strong> غير مُدرج في قائمة الأشخاص المسموح لهم بالوصول.
+            </div>
+            <button onClick={handleLogout} data-testid="access-denied-logout" style={{padding:"10px 24px",borderRadius:8,background:"#1e3a5f",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700}}>
+              🚪 تسجيل الخروج
+            </button>
+          </div>
+        </div>
+      )}
       {notif && <div style={{position:"fixed",top:14,left:"50%",transform:"translateX(-50%)",zIndex:9999,background:notif.type==="error"?"#fee2e2":notif.type==="warn"?"#fef9c3":"#dcfce7",color:notif.type==="error"?"#dc2626":notif.type==="warn"?"#92400e":"#16a34a",padding:"10px 24px",borderRadius:12,fontWeight:500,fontSize:13,border:`1px solid ${notif.type==="error"?"#fca5a5":notif.type==="warn"?"#fde68a":"#86efac"}`,boxShadow:"0 4px 20px rgba(0,0,0,0.12)"}}>{notif.msg}</div>}
 
       {confirmDialog && (
@@ -2611,8 +2641,9 @@ ${docsContext}
           {/* Left column (visual top-left): Logout above AI model dropdown */}
           <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:5,order:2}}>
             <div style={{display:"flex",alignItems:"center",gap:6}}>
+              <NotificationBell onOpenSupervisor={openSupervisorTab} />
               {userEmail && (
-                <span style={{fontSize:10,color:"#e2e8f0",opacity:0.9,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={userEmail}>👤 {userEmail}</span>
+                <span style={{fontSize:10,color:"#e2e8f0",opacity:0.9,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}} title={userEmail}>👤 {userEmail}{userRole ? ` (${userRole==="supervisor"?"مشرف":"باحث"})` : ""}</span>
               )}
               <button onClick={handleLogout} title="تسجيل الخروج" style={{background:"rgba(239,68,68,0.85)",border:"1px solid rgba(255,255,255,0.25)",color:"white",padding:"5px 10px",borderRadius:6,cursor:"pointer",fontSize:12,fontFamily:"inherit",fontWeight:600}}>
                 🚪 خروج
@@ -5070,6 +5101,8 @@ ${docsContext}
             bibliography={bibliography}
             showNotif={showNotif}
             setConfirmDialog={setConfirmDialog}
+            initialTab={supervisorTab}
+            onOpened={()=>setSupervisorTab(null)}
           />
         )}
 
