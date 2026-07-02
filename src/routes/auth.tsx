@@ -10,6 +10,14 @@ function AuthPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // If this is a Supabase password-recovery callback, forward to /reset-password
+    // (preserving the hash so the recovery tokens survive the redirect).
+    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
+      const hash = window.location.hash;
+      window.location.replace("/reset-password" + hash);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) navigate({ to: "/" });
     });
