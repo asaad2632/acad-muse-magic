@@ -1,0 +1,12 @@
+{
+  "name": "acadarchiv-frontend-shim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deployment shim. The real Vite/TanStack Start app lives at /app root; this delegator lets the Emergent builder run its expected 'yarn install / yarn build / yarn start' cycle in /app/frontend without changing the app's actual layout.",
+  "scripts": {
+    "install:root": "cd .. && yarn install --ignore-engines --frozen-lockfile",
+    "postinstall": "yarn install:root",
+    "build": "cd .. && yarn build",
+    "start": "cd .. && HOST=0.0.0.0 PORT=3000 node .output/server/index.mjs"
+  }
+}
