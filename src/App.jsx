@@ -974,6 +974,20 @@ export default function App() {
     }
     const secObj = ch.sections.find(s => String(s.id) === String(secId));
     const subObj = ch.sections.find(s => String(s.id) === String(subId));
+    // Fold the new priorityReason field (from the expanded analysis prompt) into
+    // the existing whyImportant text so it renders in the current "⭐ لماذا مهم"
+    // card without requiring any DB/UI schema change.
+    const priorityStars = parsed.priority || "";
+    const priorityReason = (parsed.priorityReason || "").toString().trim();
+    let mergedWhyImportant = parsed.whyImportant || "";
+    if (priorityReason) {
+      const header = priorityStars
+        ? `⭐ تقييم الأولوية ${priorityStars}: ${priorityReason}`
+        : `⭐ تقييم الأولوية: ${priorityReason}`;
+      mergedWhyImportant = mergedWhyImportant
+        ? `${header}\n\n${mergedWhyImportant}`
+        : header;
+    }
     return {
       ...parsed,
       chapterId: chId,
@@ -982,6 +996,7 @@ export default function App() {
       sectionName: parsed.sectionName || secObj?.title || "",
       subSectionId: subId || null,
       subSectionName: parsed.subSectionName || subObj?.title || "",
+      whyImportant: mergedWhyImportant,
       classificationReason: parsed.reason || parsed.classificationReason || "",
       classificationConfidence: parsed.confidence || parsed.classificationConfidence || "",
     };
@@ -993,7 +1008,7 @@ export default function App() {
     const thesisStructure = buildThesisStructure();
     const prompt = `أنت مساعد بحثي متخصص في تاريخ "الخليج العربي خلال الحرب العالمية الثانية 1939-1945".
 
-حلّل هذا المصدر (الملف مرفق${payload?.base64 ? " كـ PDF — استخرج النص منه ولو كان ممسوحاً ضوئياً (OCR)" : ""}).
+حلّل هذا المصدر (الملف مرفق${payload?.base64 ? " كـ PDF — استخرج النص منه ولو كان ممسوحاً ضوئياً (OCR)" : ""}) تحليلاً عميقاً ومفصّلاً — لا اختصارات ولا عبارات إنشائية.
 
 هذا هو الهيكل الكامل للأطروحة بفصولها ومباحثها وفقراتها (اختر **فقط** من المعرفات الموجودة أدناه ولا تخترع جديدة):
 ${JSON.stringify(thesisStructure, null, 2)}
@@ -1005,6 +1020,14 @@ ${JSON.stringify(thesisStructure, null, 2)}
 1. رقم الفصل الأنسب (chapterId)
 2. معرف المبحث الأنسب (sectionId) من القائمة أعلاه
 3. معرف الفقرة الفرعية (subSectionId) إن وُجدت فقرة مناسبة، وإلا اتركها null
+
+**متطلبات إلزامية للحقول العميقة (اكتبها بالعربية الفصحى وبتفصيل حقيقي، لا نصوص عامة):**
+• "priority": حدّد الأولوية بدقة (★★★ = مصدر محوري لا غنى عنه / ★★ = مفيد ويعزّز فصلاً معيناً / ★ = مرجع ثانوي أو داعم).
+• "priorityReason": سطر واحد يشرح **لماذا** أعطيت هذا التقييم بالتحديد (مثال: "وثيقة أرشيفية أصلية غير منشورة تتناول موضوع الفصل مباشرة").
+• "importantPages": الصفحات أو الأقسام المهمة داخل المصدر — أرقام دقيقة إن أمكن (مثل: "ص45-67، ص102، الفصل الثاني بالكامل") — إن لم تكن الأرقام واضحة، اذكر أسماء الأقسام/العناوين الفرعية المفيدة.
+• "whyImportant": فقرة من 2-4 أسطر تشرح لماذا هذا المصدر مهم لموضوع الأطروحة تحديداً، مع الربط بفصل/مبحث محدد وذكر الجانب البحثي الذي يُغطّيه.
+• "howToUse": فقرة من 2-4 أسطر تشرح كيف ومتى يُستخدم هذا المصدر في الكتابة (مثال: "يُستشهد به في المبحث الأول من الفصل الثاني عند مناقشة الوجود العسكري البريطاني في البحرين، ويصلح للاقتباس المباشر من صفحاته 45-52 لتوثيق أسماء الضباط والقواعد").
+• "keyPoints": 3-6 نقاط ملموسة مستخرجة من المحتوى، كل نقطة مع رقم الصفحة إن أمكن.
 
 أجب بـ JSON فقط بدون أي نص آخر وبدون code fences:
 {
@@ -1023,11 +1046,12 @@ ${JSON.stringify(thesisStructure, null, 2)}
   "reason": "سبب اختيار هذا المبحث تحديداً بناءً على محتوى المصدر",
   "sections": ["م1: ...", "م2: ..."],
   "priority": "★★★ أو ★★ أو ★",
-  "importantPages": "صفحات مهمة مع أرقامها مثل: 45-67، 102، 230-245",
+  "priorityReason": "سطر واحد يبرّر تقييم الأولوية أعلاه",
+  "importantPages": "الصفحات أو الأقسام المهمة داخل المصدر — بدقة",
   "summary": "ملخص أكاديمي موجز (4-5 أسطر) مستخلص من المحتوى الفعلي",
   "keywords": ["كلمة1","كلمة2","كلمة3","كلمة4","كلمة5"],
-  "whyImportant": "لماذا هذا المصدر مهم للأطروحة",
-  "howToUse": "كيف تستخدمه في الكتابة",
+  "whyImportant": "فقرة 2-4 أسطر: لماذا هذا المصدر مهم للأطروحة تحديداً",
+  "howToUse": "فقرة 2-4 أسطر: كيف ومتى يُستخدم في الكتابة",
   "keyPoints": [{"page":"12","point":"نقطة مهمة"},{"page":"45-47","point":"..."}]
 }`;
 
@@ -1846,12 +1870,38 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
     const docsCtx = combinedDocs.slice(0,30).map(d=>`[${d.id}] ${d.title} | ${d.archiveRef||""} | ف${d.chapterId}`).join("\n");
     try {
       const data = await callLLM({
-          max_tokens:1200,
-          messages:[{ role:"user", content:`أنت مساعد بحثي لأطروحة "الخليج العربي خلال الحرب العالمية الثانية 1939-1945".
+          max_tokens:1800,
+          messages:[{ role:"user", content:`أنت مساعد بحثي أكاديمي متعمّق لأطروحة "الخليج العربي خلال الحرب العالمية الثانية 1939-1945".
+
 سؤال الباحث: "${q}"
-الوثائق المتاحة (${combinedDocs.length} وثيقة):
+
+الوثائق المتاحة في مكتبته (${combinedDocs.length} وثيقة، أول 30 معروضة):
 ${docsCtx}
-أجب بتحليل أكاديمي، اذكر أرقام الوثائق الأكثر صلة، واقترح خطوات بحثية. أجب بالعربية.` }]
+
+**متطلبات إلزامية لإجابتك — لا تختصر، لا عبارات إنشائية:**
+اكتب إجابتك بالعربية الفصحى في أقسام مرقّمة بوضوح، وضمّنها الأقسام الأربعة التالية بأسمائها الحرفية كعناوين فرعية:
+
+١) 📋 التحليل الأكاديمي
+   - ناقش السؤال تحليلياً بربطه بالمصادر أعلاه (اذكر أرقام الوثائق [id] المرجعية).
+   - إن لم تكفِ المصادر المتاحة، اقترح فجوات بحثية وخطوات لسدّها.
+
+٢) ⭐ الأولوية والترتيب
+   - قيّم أولوية المصادر المرتبطة بالسؤال (★★★ محوري / ★★ داعم / ★ ثانوي).
+   - لكل مصدر أو مجموعة: **مبرّر الأولوية في سطر واحد** (لماذا هذا التقييم بالذات).
+
+٣) 📄 الصفحات أو الأقسام المهمة داخل كل مصدر
+   - إن أمكن استنتاجها من العناوين/الملخّصات، اذكر أرقام صفحات أو أسماء أقسام دقيقة.
+   - إن تعذّر ذلك، اذكر بديلاً معقولاً (مثال: "راجع الفصل الأول من الوثيقة [12] المتعلق بـ…").
+
+٤) 🎯 لماذا هذه المصادر مهمة لموضوع الأطروحة
+   - اربط كل مصدر أو مجموعة بفصل/مبحث محدد من خطة الأطروحة.
+   - وضّح الجانب البحثي الذي يغطّيه (سياسي/عسكري/اقتصادي/اجتماعي…).
+
+٥) ✍️ كيف ومتى تُستخدم في الكتابة
+   - اقترح استخدامات ملموسة (اقتباس مباشر / سياق تاريخي / إثبات فرضية / نقد قول سابق).
+   - اذكر متى يُدرج المصدر في متن الأطروحة (أي فصل، أي مبحث، أي فقرة).
+
+اجعل الإجابة كثيفة معلوماتياً — كل سطر يحمل معلومة نافعة.` }]
         });
       setAiResult(data.content?.map(c=>c.text||"").join("") || "");
     } catch { setAiResult("خطأ في الاتصال"); }

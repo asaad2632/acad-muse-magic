@@ -2,6 +2,8 @@ import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
 
+type Provider = "groq" | "lovable" | "openrouter";
+
 function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal = false) {
   const msgs: { role: string; content: unknown }[] = [];
   if (system) msgs.push({ role: "system", content: system });
@@ -16,6 +18,15 @@ function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal 
   return msgs;
 }
 
+function detectProvider(model: string, forceProvider?: string): Provider {
+  if (forceProvider === "lovable") return "lovable";
+  if (forceProvider === "groq") return "groq";
+  if (forceProvider === "openrouter") return "openrouter";
+  if (model.startsWith("groq/")) return "groq";
+  if (model.startsWith("openrouter/")) return "openrouter";
+  return "lovable";
+}
+
 export const Route = createFileRoute("/api/ai-chat")({
   server: {
     handlers: {
@@ -26,23 +37,22 @@ export const Route = createFileRoute("/api/ai-chat")({
             messages?: ChatMsg[];
             max_tokens?: number;
             model?: string;
-            forceProvider?: "lovable" | "groq";
+            forceProvider?: Provider;
           };
           const requestedModel = body.model || "groq/llama-3.3-70b-versatile";
-          const isGroq = body.forceProvider === "lovable"
-            ? false
-            : body.forceProvider === "groq"
-              ? true
-              : requestedModel.startsWith("groq/");
-          const model = body.forceProvider === "lovable" && requestedModel.startsWith("groq/")
-            ? "google/gemini-2.5-flash"
-            : requestedModel;
+          const provider = detectProvider(requestedModel, body.forceProvider);
+          // If caller forced lovable but sent a groq/openrouter model id, swap to a lovable model.
+          const model =
+            body.forceProvider === "lovable" && !requestedModel.startsWith("google/")
+              ? "google/gemini-2.5-flash"
+              : requestedModel;
 
           let endpoint: string;
           let headers: Record<string, string>;
           let sendModel: string;
+          const allowMultimodal = provider === "lovable";
 
-          if (isGroq) {
+          if (provider === "groq") {
             const gKey = (process.env.GROQ_API_KEY || "").trim().replace(/^["']|["']$/g, "");
             if (!gKey) {
               return new Response(JSON.stringify({ error: "Missing GROQ_API_KEY" }), {
@@ -57,6 +67,24 @@ export const Route = createFileRoute("/api/ai-chat")({
               Accept: "application/json",
             };
             sendModel = model.replace(/^groq\//, "");
+          } else if (provider === "openrouter") {
+            const orKey = (process.env.OPENROUTER_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+            if (!orKey) {
+              return new Response(JSON.stringify({ error: "Missing OPENROUTER_API_KEY" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            endpoint = "https://openrouter.ai/api/v1/chat/completions";
+            headers = {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${orKey}`,
+              Accept: "application/json",
+              // OpenRouter recommends these two headers for attribution but they are optional.
+              "HTTP-Referer": "https://acadarchiv.app",
+              "X-Title": "AcadArchiv",
+            };
+            sendModel = model.replace(/^openrouter\//, "");
           } else {
             const key = process.env.LOVABLE_API_KEY;
             if (!key) {
@@ -75,7 +103,7 @@ export const Route = createFileRoute("/api/ai-chat")({
 
           const payload = JSON.stringify({
             model: sendModel,
-            messages: toOpenAIMessages(body.messages || [], body.system, !isGroq),
+            messages: toOpenAIMessages(body.messages || [], body.system, allowMultimodal),
             max_tokens: body.max_tokens ?? 1024,
           });
 
@@ -89,8 +117,15 @@ export const Route = createFileRoute("/api/ai-chat")({
             await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
           }
 
-          // Fallback: if Groq still failing with 5xx/429, retry once on Lovable Cloud
-          if (resp && !resp.ok && isGroq && (resp.status === 429 || resp.status >= 500)) {
+          // Fallback: if the primary provider is still failing with 5xx/429, try Lovable
+          // Cloud (Gemini) as a last resort — only for Groq/OpenRouter primaries, since
+          // Lovable itself is the fallback target.
+          if (
+            resp &&
+            !resp.ok &&
+            provider !== "lovable" &&
+            (resp.status === 429 || resp.status >= 500)
+          ) {
             const key = process.env.LOVABLE_API_KEY;
             if (key) {
               const fbPayload = JSON.stringify({

@@ -1,8 +1,10 @@
 // AI model configuration. The app proxies all calls through /api/ai-chat.
-// Two providers only: Lovable Cloud (Gemini via Lovable AI Gateway) and Groq.
+// Three providers: Groq (user's own key), Lovable Cloud (Gemini gateway),
+// and OpenRouter (free-tier community-hosted models).
 
 export const AI_MODELS = [
   { id: "groq/llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B (مفتاحك الخاص)" },
+  { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "OpenRouter — Llama 3.3 70B (مجاني)" },
   { id: "google/gemini-3-flash-preview", label: "Lovable Cloud — Gemini 3 Flash" },
 ];
 
