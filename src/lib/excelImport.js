@@ -126,20 +126,80 @@ function matchChapter(sheetName, chapters = []) {
 }
 
 // Match "المبحث في خطتك" text to a section within a chapter.
+// The stored `section.title` in CHAPTERS_DATA / DB uses a numbering prefix on
+// every main section ("م1: ...", "م2: ...") and an indent + arrow on sub-sections
+// ("   ↳ ..."). The Excel cell often either uses the same prefix with shorter or
+// paraphrased wording after it, or drops the prefix entirely. Three-tier match:
+//   Tier 1 — deterministic: parse "م<N>" from the Excel cell → build "<chapterId>-<N>"
+//            → direct lookup by id. Always wins if present.
+//   Tier 2 — normalized substring after stripping the numbering prefix and the
+//            "   ↳ " sub-section indent from BOTH sides. Bidirectional.
+//   Tier 3 — token-overlap: after normalization + stop-word removal, pick the
+//            section that shares the largest count of meaningful tokens (≥ 2).
 function matchSection(sectionText, chapter) {
   if (!chapter || !sectionText) return { sectionId: null, sectionTitle: null };
   const secs = chapter.sections || [];
-  const q = normalizeAr(sectionText);
-  if (!q) return { sectionId: null, sectionTitle: null };
-  // exact-normalized
-  let hit = secs.find((s) => normalizeAr(s.title) === q);
-  // substring either direction
-  if (!hit) hit = secs.find((s) => {
-    const t = normalizeAr(s.title);
-    return t && (t.includes(q) || q.includes(t));
-  });
-  if (!hit) return { sectionId: null, sectionTitle: null };
-  return { sectionId: hit.id, sectionTitle: hit.title };
+  if (!secs.length) return { sectionId: null, sectionTitle: null };
+  const raw = clean(sectionText);
+  if (!raw) return { sectionId: null, sectionTitle: null };
+
+  // ---- Tier 1: parse "م<N>" and look up "<chapterId>-<N>" directly.
+  const numMatch = raw.match(/م\s*(\d+)/);
+  if (numMatch) {
+    const wantId = `${chapter.id}-${numMatch[1]}`;
+    const hit = secs.find((s) => String(s.id) === wantId);
+    if (hit) return { sectionId: hit.id, sectionTitle: hit.title };
+  }
+
+  // Strip prefixes/indent so wording comparisons focus on meaningful text.
+  const stripSectionPrefix = (t) =>
+    String(t || "")
+      .replace(/^\s*↳\s*/, "")               // sub-section arrow (any leading spaces)
+      .replace(/^\s*م\s*\d+\s*[:：\-]?\s*/, "") // main "م1:" / "م 2 -" prefix
+      .trim();
+  const qStripped = normalizeAr(stripSectionPrefix(raw));
+
+  // ---- Tier 2: bidirectional substring on prefix-stripped, normalized text.
+  if (qStripped) {
+    const hit = secs.find((s) => {
+      const t = normalizeAr(stripSectionPrefix(s.title || ""));
+      if (!t) return false;
+      return t === qStripped || t.includes(qStripped) || qStripped.includes(t);
+    });
+    if (hit) return { sectionId: hit.id, sectionTitle: hit.title };
+  }
+
+  // ---- Tier 3: token-overlap fallback.
+  // Split on whitespace, drop tokens shorter than 3 chars and Arabic stop-words.
+  const AR_STOP = new Set([
+    "في","من","على","الى","إلى","عن","مع","بين","او","أو","و","أن","ان","ما",
+    "هذا","هذه","ذلك","تلك","هو","هي","التي","الذي","الذين","اللواتي","بعد","قبل",
+    "خلال","ضمن","حول","نحو","دون","تحت","فوق","الى","الى","ما","لم","لا","لن","قد",
+    // very-common thesis-domain tokens that don't discriminate between sections
+    "الخليج","العربي","الحرب","العالمية","الثانية","الفصل","المبحث",
+  ]);
+  const toTokens = (t) =>
+    normalizeAr(stripSectionPrefix(t))
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !AR_STOP.has(w));
+
+  const qTokens = new Set(toTokens(raw));
+  if (qTokens.size >= 2) {
+    let best = null;
+    let bestScore = 1; // require at least 2 shared tokens
+    for (const s of secs) {
+      const sTokens = toTokens(s.title || "");
+      let overlap = 0;
+      for (const w of sTokens) if (qTokens.has(w)) overlap += 1;
+      if (overlap > bestScore) {
+        bestScore = overlap;
+        best = s;
+      }
+    }
+    if (best) return { sectionId: best.id, sectionTitle: best.title };
+  }
+
+  return { sectionId: null, sectionTitle: null };
 }
 
 // Normalize a priority cell to the star-string used elsewhere in the app.

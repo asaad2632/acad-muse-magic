@@ -4,23 +4,26 @@ import * as XLSX from "xlsx";
 import { parseLibraryExcel, qdlUrlForRef, buildNotesWithRef, extractRefFromNotes } from "../src/lib/excelImport.js";
 import fs from "fs";
 
-// Simulated live `chapters` state (same shape App.jsx uses).
+// Simulated live `chapters` state (real prod shape from CHAPTERS_DATA in App.jsx —
+// every main section starts with a "م<N>:" numbering prefix; sub-sections start
+// with "   ↳ ").
 const chapters = [
   { id: 1, titleAr: "الفصل الأول: الأهمية الاستراتيجية للخليج العربي", sections: [
-    { id: "1-1", title: "الموقع الجغرافي والممرات المائية" },
-    { id: "1-2", title: "الثروة النفطية" },
+    { id: "1-1", title: "م1: الموقع الجغرافي وممرات التجارة العالمية في منطقة الخليج العربي" },
+    { id: "1-2", title: "م2: بنية الإمارات ومشيخات الخليج العربي السياسية حتى عام 1939" },
   ]},
   { id: 2, titleAr: "الفصل الثاني: النفوذ البريطاني في الخليج", sections: [
-    { id: "2-1", title: "معاهدات الحماية" },
-    { id: "2-2", title: "دور المقيم السياسي في بوشهر" },
-    { id: "2-3", title: "قواعد الأسطول البريطاني" },
+    { id: "2-1", title: "م1: موقع الخليج العربي الاستراتيجي في خطط الحلفاء العسكرية" },
+    { id: "2-1a", title: "   ↳ إنشاء وتطوير القواعد البريطانية والأمريكية الجوية والبحرية" },
+    { id: "2-2", title: "م2: القواعد العسكرية وموانئ الخليج ودورها في العمليات الحربية" },
+    { id: "2-3", title: "م3: السيادة والسيطرة البحرية والأمن العسكري في الخليج إبان الحرب" },
   ]},
   { id: 3, titleAr: "الفصل الثالث: العراق والخليج خلال الحرب", sections: [
-    { id: "3-1", title: "ميناء البصرة كمعبر للإمدادات" },
-    { id: "3-2", title: "حقول النفط في كركوك" },
+    { id: "3-1", title: "م1: التغيرات السياسية والإدارية في إمارات الخليج إبان الحرب" },
+    { id: "3-2", title: "م2: تأثير الحرب على الوعي السياسي وبداية التحولات الحديثة في الخليج" },
   ]},
   { id: 4, titleAr: "الفصل الرابع: الدور الأمريكي المتنامي", sections: [
-    { id: "4-1", title: "امتيازات النفط في السعودية" },
+    { id: "4-1", title: "م1: أثر الحرب العالمية الثانية في التجارة والملاحة في الخليج" },
   ]},
 ];
 
@@ -46,11 +49,14 @@ function buildTestWorkbook() {
   XLSX.utils.book_append_sheet(wb, otherSeries, "سلاسل أخرى مكتشفة");
 
   // ---- Data sheet: الفصل الثاني ----
+  // Row 1: EXACT "م<N>:" prefix — should match via Tier 1 (deterministic ID).
+  // Row 2: PARAPHRASED wording after prefix — must match via Tier 1 OR Tier 3.
+  // Row 3: NO prefix at all, just a bare partial phrase — must match via Tier 2 or Tier 3.
   const ch2 = XLSX.utils.aoa_to_sheet([
     ["م","عنوان الملف","المرجع الأرشيفي","المبحث في خطتك","العنصر الفرعي","الأولوية","نوع الوثيقة","جديد؟","الحالة","الأوراق المفيدة","ملاحظات"],
-    [1,"تقرير المقيم السياسي في بوشهر 1941","IOR/L/PS/12/3720","دور المقيم السياسي في بوشهر","","★★★","تقرير رسمي","نعم","متاح","ص12-45","تقرير مهم عن التحركات المحورية"],
-    [2,"مراسلات حول قواعد الأسطول","IOR/R/15/1/456","قواعد الأسطول البريطاني","","★★","مراسلات","لا","متاح","ص1-30","يشمل قاعدة البحرين"],
-    [3,"معاهدة الحماية مع الكويت 1899","FO 371/12345","معاهدات الحماية","","★","نص معاهدة","لا","متاح","","تم استخدامه سابقاً"],
+    [1,"تقرير المقيم السياسي في بوشهر 1941","IOR/L/PS/12/3720","م3: السيادة والسيطرة البحرية والأمن العسكري في الخليج إبان الحرب","","★★★","تقرير رسمي","نعم","متاح","ص12-45","تقرير مهم عن التحركات المحورية"],
+    [2,"مراسلات حول قواعد الأسطول","IOR/R/15/1/456","م2: القواعد العسكرية وموانئ الخليج","","★★","مراسلات","لا","متاح","ص1-30","يشمل قاعدة البحرين"],
+    [3,"معاهدة الحماية مع الكويت 1899","FO 371/12345","الحلفاء العسكرية خطط الاستراتيجي","","★","نص معاهدة","لا","متاح","","تم استخدامه سابقاً"],
     [4,"","","","","","","","","",""], // fully empty row — should be skipped
   ]);
   XLSX.utils.book_append_sheet(wb, ch2, "الفصل الثاني");
@@ -58,8 +64,8 @@ function buildTestWorkbook() {
   // ---- Data sheet: الفصل الثالث ----
   const ch3 = XLSX.utils.aoa_to_sheet([
     ["م","عنوان الملف","المرجع الأرشيفي","المبحث في خطتك","العنصر الفرعي","الأولوية","نوع الوثيقة","جديد؟","الحالة","الأوراق المفيدة","ملاحظات"],
-    [1,"إحصائيات ميناء البصرة 1942","IOR/L/PS/12/9999","ميناء البصرة كمعبر للإمدادات","","★★★","إحصائيات","نعم","متاح","ص50-100",""],
-    [2,"تقرير عن حقول كركوك","IOR/L/PS/12/8888","حقول النفط في كركوك","","★★","تقرير","نعم","متاح","","تفاصيل إنتاج"],
+    [1,"إحصائيات ميناء البصرة 1942","IOR/L/PS/12/9999","م1: التغيرات السياسية والإدارية في إمارات الخليج إبان الحرب","","★★★","إحصائيات","نعم","متاح","ص50-100",""],
+    [2,"تقرير عن حقول كركوك","IOR/L/PS/12/8888","م2: تأثير الحرب على الوعي السياسي","","★★","تقرير","نعم","متاح","","تفاصيل إنتاج"],
   ]);
   XLSX.utils.book_append_sheet(wb, ch3, "الفصل الثالث");
 
@@ -117,11 +123,18 @@ async function main() {
   ok(row1.title === "تقرير المقيم السياسي في بوشهر 1941", "row1 title parsed");
   ok(row1.archiveRef === "IOR/L/PS/12/3720", "row1 archiveRef parsed");
   ok(row1.priorityStars === "★★★" && row1.priorityNumeric === 3, "row1 priority ★★★→3");
-  ok(row1.sectionIdMatched === "2-2", `row1 section matched to 2-2 (got ${row1.sectionIdMatched})`);
+  ok(row1.sectionIdMatched === "2-3", `row1 (م3: exact prefix) matched to 2-3 via Tier 1 (got ${row1.sectionIdMatched})`);
   ok(row1.url === "https://www.qdl.qa/en/search#q=IOR%2FL%2FPS%2F12%2F3720&start=0", `row1 QDL url synthesized (got ${row1.url})`);
+  const row2 = ch2parsed.rows[1];
+  ok(row2.sectionIdMatched === "2-2", `row2 (م2: paraphrased) matched to 2-2 via Tier 1 (got ${row2.sectionIdMatched})`);
   const row3 = ch2parsed.rows[2];
   ok(row3.archiveRef === "FO 371/12345", "row3 non-IOR ref preserved");
   ok(row3.url === null, "row3 (FO 371) → no QDL url");
+  ok(row3.sectionIdMatched === "2-1", `row3 (NO prefix, bare tokens) matched to 2-1 via Tier 2/3 (got ${row3.sectionIdMatched})`);
+  // ch3 assertions
+  const ch3rows = ch3parsed.rows;
+  ok(ch3rows[0].sectionIdMatched === "3-1", `ch3 row1 (م1: exact) matched to 3-1 (got ${ch3rows[0].sectionIdMatched})`);
+  ok(ch3rows[1].sectionIdMatched === "3-2", `ch3 row2 (م2: prefix + partial wording) matched to 3-2 (got ${ch3rows[1].sectionIdMatched})`);
   // Notes tagging
   const notes = buildNotesWithRef("IOR/L/PS/12/3720", "hello notes");
   ok(notes.includes("المرجع الأرشيفي: IOR/L/PS/12/3720"), "buildNotesWithRef embeds ref");
