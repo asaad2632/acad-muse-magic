@@ -34,3 +34,10 @@ dist-ssr
 # Local secrets / memory (never commit)
 memory/
 
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
