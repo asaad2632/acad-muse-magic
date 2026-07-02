@@ -1140,14 +1140,28 @@ ${JSON.stringify(thesisStructure, null, 2)}
         continue;
       }
 
-      // Extract content per type — unified pipeline: every file becomes either
-      // raw text OR a base64 blob sent to Gemini multimodal (handles OCR natively).
+      // Extract content per type — unified pipeline: every file becomes raw text
+      // (PDFs are text-extracted client-side via pdfjs-dist, same helper used by
+      // the translator flow below). Images fall back to base64 with a filename
+      // hint so analysis still runs (best-effort, no OCR here).
       let payload = null;
       let storedText = null;
       try {
         if (ext === "pdf") {
-          const base64 = await readFileAsBase64(file);
-          payload = { base64, mimeType: "application/pdf" };
+          try {
+            const { text: pdfText } = await extractPdfPages(file);
+            storedText = pdfText || "";
+            if (storedText.length < 100) {
+              // Scanned/image-only PDF — no extractable text. Still let the LLM
+              // classify from the filename; user can edit metadata manually.
+              payload = { text: `(ملف PDF ممسوح ضوئياً — لا يوجد نص قابل للاستخراج)\nاسم الملف: ${file.name}` };
+            } else {
+              payload = { text: storedText };
+            }
+          } catch (pdfErr) {
+            console.error("[lib-upload-pdf-extract]", pdfErr);
+            payload = { text: `(تعذّر استخراج نص PDF)\nاسم الملف: ${file.name}` };
+          }
         } else if (isImage) {
           const base64 = await readFileAsBase64(file);
           const mime = file.type || `image/${ext === "jpg" ? "jpeg" : ext}`;

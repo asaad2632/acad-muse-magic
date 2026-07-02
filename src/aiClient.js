@@ -22,25 +22,17 @@ export async function callLLM({ system, messages = [], max_tokens = 1024, forceP
   }
 }
 
-// Analyze a document. For PDFs we send the file as a multimodal block to Gemini
-// (handles OCR for scanned PDFs natively). For text-based files (md/txt/docx text)
-// we just send the extracted text. Always routed through Lovable Cloud (Gemini).
+// Analyze a document. Text-based files (md/txt/docx/pdf) are sent as extracted
+// text and routed through the default provider (Groq) — same working path as
+// the chat feature. Images fall back to a text-only prompt with the filename.
 export async function analyzeDocumentLLM({ prompt, fileName, mimeType, base64, text, max_tokens = 1800 }) {
-  const userContent = base64
-    ? [
-        { type: "text", text: prompt },
-        {
-          type: "file",
-          file: {
-            filename: fileName || "document.pdf",
-            file_data: `data:${mimeType || "application/pdf"};base64,${base64}`,
-          },
-        },
-      ]
-    : `${prompt}\n\n--- محتوى الملف (${fileName}) ---\n${(text || "").substring(0, 60000)}`;
+  const userContent = text
+    ? `${prompt}\n\n--- محتوى الملف (${fileName}) ---\n${(text || "").substring(0, 60000)}`
+    : base64
+      ? `${prompt}\n\n--- ملاحظة ---\nهذا ملف صورة/ثنائي (${mimeType || "unknown"}) باسم "${fileName}". لا يمكن استخراج محتوى نصي منه تلقائياً؛ استنتج ما تستطيع من اسم الملف فقط، ثم اترك حقول summary/keywords/importantPages فارغة إن لزم.`
+      : `${prompt}\n\n--- الملف ---\n${fileName || "unknown"}`;
 
   return callLLM({
-    forceProvider: "lovable",
     max_tokens,
     messages: [{ role: "user", content: userContent }],
   });
