@@ -6,6 +6,7 @@ import SupervisorRoom from "./SupervisorRoom";
 import NotificationBell from "./NotificationBell";
 import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats, getMyRole } from "./cloudSync";
 import { supabase } from "@/integrations/supabase/client";
+import { parseLibraryExcel, buildNotesWithRef, extractRefFromNotes } from "./lib/excelImport";
 
 // ============================================================
 // بيانات الفصول والمباحث — مستخرجة من خطة السمنار
@@ -921,7 +922,9 @@ export default function App() {
   const [libSelected, setLibSelected] = useState(null);
   const [libUrlInput, setLibUrlInput] = useState("");
   const [libUrlLoading, setLibUrlLoading] = useState(false);
+  const [libExcelLoading, setLibExcelLoading] = useState(false);
   const libFileRef = useRef(null);
+  const libExcelRef = useRef(null);
 
   // Legacy alias — retained so existing callers don't crash. Cloud writes now
   // happen through insertLibraryRow / updateLibraryRow / deleteLibraryRow.
@@ -1261,6 +1264,127 @@ ${JSON.stringify(thesisStructure, null, 2)}
       showNotif("⚠️ تعذّر استخراج البيانات — حاول مرة أخرى", "error");
     }
     setLibUrlLoading(false);
+  };
+
+  // ---------------------------------------------------------------
+  // Bulk Excel import — parses a workbook with one sheet per chapter,
+  // skips instructional sheets automatically, matches chapters/sections
+  // against the live `chapters` state, dedupes by archive reference.
+  // ---------------------------------------------------------------
+  const handleLibExcelImport = async (fileList) => {
+    const file = fileList?.[0] || fileList;
+    if (!file) return;
+    const ext = (file.name || "").split(".").pop().toLowerCase();
+    if (!["xlsx", "xls"].includes(ext)) {
+      showNotif("⚠️ يجب أن يكون الملف بصيغة Excel (.xlsx أو .xls)", "warn");
+      return;
+    }
+    setLibExcelLoading(true);
+    try {
+      const parsed = await parseLibraryExcel(file, { chapters });
+
+      // Build a set of already-imported archive refs (dedup key).
+      const existingRefs = new Set();
+      for (const src of library) {
+        const ref = extractRefFromNotes(src.notes);
+        if (ref) existingRefs.add(ref);
+      }
+
+      let importedCount = 0;
+      let skippedDup = 0;
+      let errorCount = 0;
+      const perChapter = {}; // { chapterName: { imported, skipped } }
+      const toInsert = [];
+
+      for (const sheet of parsed.dataSheets) {
+        const chKey = sheet.chapterTitle || sheet.sheetName;
+        if (!perChapter[chKey]) perChapter[chKey] = { imported: 0, skipped: 0, errors: 0 };
+
+        for (const row of sheet.rows) {
+          if (row.archiveRef && existingRefs.has(row.archiveRef)) {
+            skippedDup += 1;
+            perChapter[chKey].skipped += 1;
+            continue;
+          }
+          try {
+            const displayName = row.url || row.archiveRef || row.title || "excel-row";
+            const src = {
+              id: Date.now() + Math.random(),
+              fileName: displayName,
+              fileType: row.url ? "url" : "excel",
+              uploadDate: new Date().toLocaleDateString("ar-IQ"),
+              status: "تم الاستيراد ✅",
+              analyzed: true,
+              title: row.title || row.archiveRef || "(بدون عنوان)",
+              author: "",
+              year: "",
+              language: "",
+              sourceType: row.sourceType || "",
+              chapterId: sheet.chapterId,
+              sectionId: row.sectionIdMatched || "",
+              subSectionId: "",
+              sections: row.sectionTitleMatched ? [row.sectionTitleMatched] : [],
+              priority: row.priorityStars,
+              importantPages: row.importantPages || "",
+              summary: "",
+              keywords: [],
+              whyImportant: "",
+              howToUse: "",
+              keyPoints: [],
+              notes: buildNotesWithRef(row.archiveRef, row.notes),
+            };
+            toInsert.push(src);
+            if (row.archiveRef) existingRefs.add(row.archiveRef);
+            importedCount += 1;
+            perChapter[chKey].imported += 1;
+          } catch (rowErr) {
+            console.error("[excel-import-row]", sheet.sheetName, row.rowIndex, rowErr);
+            errorCount += 1;
+            perChapter[chKey].errors += 1;
+          }
+        }
+      }
+
+      // Prepend everything to library state, then persist each row to Supabase.
+      if (toInsert.length) {
+        updateLibrary(prev => [...toInsert, ...prev]);
+        for (const src of toInsert) {
+          try {
+            const { error: insErr, errorType } = await insertLibraryRow(src);
+            if (insErr) {
+              setPendingLibIds(prev => new Set([...prev, String(src.id)]));
+              showLibDiagIfNeeded(errorType);
+              errorCount += 1;
+            }
+          } catch (e) {
+            console.error("[excel-import-persist]", e);
+            errorCount += 1;
+          }
+        }
+      }
+
+      // Build Arabic summary
+      const chapterLines = Object.entries(perChapter)
+        .map(([name, c]) => `   • ${name}: مستورد ${c.imported}${c.skipped ? ` — متجاهل (مكرر) ${c.skipped}` : ""}${c.errors ? ` — أخطاء ${c.errors}` : ""}`)
+        .join("\n");
+      const skippedSheetsLine = parsed.skippedSheets.length
+        ? `\nأوراق تم تخطيها (ليست بيانات): ${parsed.skippedSheets.map(s => s.sheetName).join("، ")}`
+        : "";
+      const summary =
+        `✅ اكتمل الاستيراد من ${file.name}\n` +
+        `عدد الوثائق المستوردة: ${importedCount}\n` +
+        `عدد التي تم تجاهلها (مكررة): ${skippedDup}\n` +
+        `عدد الأخطاء: ${errorCount}${chapterLines ? "\n\nتوزيع حسب الفصل:\n" + chapterLines : ""}${skippedSheetsLine}`;
+
+      showNotif(summary, importedCount ? "success" : "warn");
+      console.log("[excel-import-summary]", { importedCount, skippedDup, errorCount, perChapter, skippedSheets: parsed.skippedSheets });
+    } catch (err) {
+      console.error("[handleLibExcelImport]", err);
+      showNotif("⚠️ تعذّر قراءة ملف الإكسل — تأكد من صيغة .xlsx", "error");
+    } finally {
+      setLibExcelLoading(false);
+      if (libExcelRef.current) libExcelRef.current.value = "";
+    }
   };
 
   const updateLibSrc = (id, changes) => {
@@ -3898,6 +4022,28 @@ ${docsContext}
                 <input value={libUrlInput} onChange={e=>setLibUrlInput(e.target.value)} placeholder="https://www.qdl.qa/... أو jstor.org أو archive.org أو أي رابط" style={{flex:1,padding:"8px 12px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:12,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter")handleLibUrlImport();}}/>
                 <button onClick={handleLibUrlImport} disabled={libUrlLoading} style={{padding:"8px 16px",borderRadius:8,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,whiteSpace:"nowrap"}}>
                   {libUrlLoading?"⏳ جاري...":"إضافة + تحليل"}
+                </button>
+              </div>
+
+              {/* استيراد جماعي من ملف إكسل */}
+              <div style={{marginTop:12,paddingTop:12,borderTop:"1px dashed #e2e8f0"}}>
+                <div style={{fontWeight:600,fontSize:12,marginBottom:6,color:"#475569"}}>📊 استيراد جماعي من ملف إكسل</div>
+                <div style={{fontSize:11,color:"#94a3b8",marginBottom:8}}>ورقة لكل فصل، أعمدة: عنوان الملف · المرجع الأرشيفي · المبحث · الأولوية · نوع الوثيقة · ملاحظات — أوراق التعليمات تُتجاهل تلقائياً، والمصادر المكررة (بنفس المرجع الأرشيفي) تُتخطى.</div>
+                <input
+                  ref={libExcelRef}
+                  type="file"
+                  accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                  data-testid="lib-excel-input"
+                  style={{display:"none"}}
+                  onChange={e=>{if(e.target.files?.[0]) handleLibExcelImport(e.target.files);}}
+                />
+                <button
+                  onClick={()=>libExcelRef.current?.click()}
+                  disabled={libExcelLoading}
+                  data-testid="lib-excel-import-btn"
+                  style={{padding:"8px 16px",borderRadius:8,background:libExcelLoading?"#94a3b8":"#7c3aed",color:"white",border:"none",cursor:libExcelLoading?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,whiteSpace:"nowrap"}}
+                >
+                  {libExcelLoading ? "⏳ جاري الاستيراد..." : "📊 استيراد من إكسل (.xlsx)"}
                 </button>
               </div>
             </div>
