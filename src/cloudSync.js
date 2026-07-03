@@ -405,6 +405,23 @@ export async function deleteLibraryRow(clientId) {
   return { error };
 }
 
+// Bulk delete: single round-trip for a list of client_ids. Used by the
+// multi-select "delete selected" flow in the Library page so we don't fire
+// one request per row (240 rows would otherwise = 240 requests).
+export async function deleteLibraryRows(clientIds) {
+  const userId = await uid();
+  if (!userId) return { error: new Error("no-user"), count: 0 };
+  const ids = (clientIds || []).map((x) => String(x)).filter(Boolean);
+  if (!ids.length) return { error: null, count: 0 };
+  const { error } = await supabase
+    .from("library_sources")
+    .delete()
+    .eq("user_id", userId)
+    .in("client_id", ids);
+  if (error) console.warn("[deleteLibraryRows]", error);
+  return { error, count: ids.length };
+}
+
 
 // ==================== Phase 3c: bibliography / cards / translations / custom_formats / researcher_analysis ====================
 

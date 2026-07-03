@@ -8,36 +8,41 @@
 //                             isNew, status, importantPages, notes,
 //                             url, sectionIdMatched, sectionTitleMatched }] }],
 //     skippedSheets: [{ sheetName, reason }],
-//     totals: { dataSheetCount, rowCount }
+//     sheetErrors:   [{ sheetName, reason }],      // sheets that threw during parse
+//     rowErrors:     [{ sheetName, rowIndex, reason }],
+//     totals: { dataSheetCount, rowCount, scannedRowCount, sheetCount }
 //   }
 //
 // Design notes:
-//   - Never hard-coded to a specific workbook; header detection is by content match
-//     (a sheet is a "data sheet" iff row 1..5 contains both "عنوان الملف" AND
-//     "المرجع الأرشيفي" — instructional/summary sheets are skipped).
-//   - Column order is discovered from the header row, so future files that add or
-//     reorder columns still work.
-//   - Chapter matching: parse Arabic ordinal from sheet name → numeric → look up in
-//     the caller-provided `chapters` array. Falls back to substring match.
-//   - Section matching: exact-then-substring against `chapter.sections[].title`.
+//   - Never hard-coded to a specific workbook; header detection is by content
+//     match (a sheet is treated as data iff any row within the first 15 rows
+//     has EITHER a title-alias header OR an archive-ref-alias header — plus at
+//     least one additional recognized column). Instructional/summary sheets
+//     are skipped with a reason.
+//   - Column order is discovered from the header row, so future files that add
+//     or reorder columns still work.
+//   - Every sheet is processed independently inside its own try/catch. A single
+//     failing sheet or a single failing row never aborts the whole import.
+//   - Chapter matching: parse Arabic ordinal from sheet name → numeric → look
+//     up in the caller-provided `chapters` array. Falls back to substring.
+//   - Section matching: three-tier (deterministic "م<N>" → substring → token
+//     overlap) against `chapter.sections[].title`.
 //   - QDL fallback URL: only for archiveRef starting with "IOR/".
 
 import * as XLSX from "xlsx";
 
 // ---- constants -------------------------------------------------------------
-const REQUIRED_HEADERS = ["عنوان الملف", "المرجع الأرشيفي"];
-
 const HEADER_ALIASES = {
   serial:         ["م", "#", "الرقم"],
-  title:          ["عنوان الملف", "العنوان", "اسم الملف"],
-  archiveRef:     ["المرجع الأرشيفي", "المرجع", "الرقم الأرشيفي"],
-  sectionText:    ["المبحث في خطتك", "المبحث", "الفرع"],
-  subElement:     ["العنصر الفرعي", "الفقرة", "المطلب"],
+  title:          ["عنوان الملف", "العنوان", "اسم الملف", "عنوان المصدر", "عنوان الوثيقة"],
+  archiveRef:     ["المرجع الأرشيفي", "المرجع", "الرقم الأرشيفي", "رقم الوثيقة", "رقم الوثيقة الأرشيفية"],
+  sectionText:    ["المبحث في خطتك", "المبحث", "الفرع", "المبحث في الخطة"],
+  subElement:     ["العنصر الفرعي", "الفقرة", "المطلب", "العنصر"],
   priority:       ["الأولوية", "الأهمية"],
-  sourceType:     ["نوع الوثيقة", "نوع المصدر", "النوع"],
+  sourceType:     ["نوع الوثيقة", "نوع المصدر", "النوع", "التصنيف"],
   isNew:          ["جديد؟", "جديد"],
   status:         ["الحالة"],
-  importantPages: ["الأوراق المفيدة", "الصفحات المفيدة", "الأوراق"],
+  importantPages: ["الأوراق المفيدة", "الصفحات المفيدة", "الأوراق", "الصفحات"],
   notes:          ["ملاحظات", "الملاحظات"],
 };
 
@@ -55,6 +60,8 @@ const AR_ORDINALS = {
   "العاشر": 10, "العاشرة": 10,
 };
 
+const HEADER_SCAN_LIMIT = 15; // rows to scan for the header row per sheet
+
 // ---- helpers ---------------------------------------------------------------
 const clean = (v) => (v == null ? "" : String(v).replace(/\s+/g, " ").trim());
 
@@ -65,31 +72,50 @@ function normalizeAr(s) {
     .replace(/[إأآا]/g, "ا")
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
-    .replace(/[«»"'،.]/g, "")
+    .replace(/[«»"'،.؛:؟]/g, "")
     .toLowerCase();
 }
 
-// Locate the header row in a sheet-of-arrays. Scans first 8 rows; returns
-// { rowIndex, columnMap } or null if no matching header found.
+// Try to identify a field name from a header cell using alias matching.
+function fieldOfCell(cellNorm) {
+  if (!cellNorm) return null;
+  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+    for (const a of aliases) {
+      const an = normalizeAr(a);
+      if (!an) continue;
+      if (cellNorm === an || cellNorm.includes(an) || an.includes(cellNorm)) {
+        return field;
+      }
+    }
+  }
+  return null;
+}
+
+// Locate the header row in a sheet-of-arrays. Scans first HEADER_SCAN_LIMIT
+// rows. A row qualifies as a header row iff it contains EITHER a title-alias
+// OR an archive-ref-alias, PLUS at least one other recognized column (to
+// avoid mistaking a single-cell title row for a header).
+// Returns { rowIndex, columnMap } or null.
 function detectHeaderRow(rows) {
-  const scanLimit = Math.min(rows.length, 8);
+  const scanLimit = Math.min(rows.length, HEADER_SCAN_LIMIT);
   for (let r = 0; r < scanLimit; r++) {
     const cells = (rows[r] || []).map(clean);
     if (!cells.length) continue;
     const cellsNorm = cells.map(normalizeAr);
-    const hasAll = REQUIRED_HEADERS.every((h) =>
-      cellsNorm.some((c) => c.includes(normalizeAr(h)))
-    );
-    if (!hasAll) continue;
 
     // Build a column map: field -> column index
     const columnMap = {};
-    for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-      const aliasesNorm = aliases.map(normalizeAr);
-      const idx = cellsNorm.findIndex((c) => aliasesNorm.some((a) => c === a || c.includes(a)));
-      if (idx !== -1) columnMap[field] = idx;
+    for (let c = 0; c < cellsNorm.length; c++) {
+      const f = fieldOfCell(cellsNorm[c]);
+      if (f && columnMap[f] == null) columnMap[f] = c;
     }
-    return { rowIndex: r, columnMap };
+    const hasTitleOrRef = columnMap.title != null || columnMap.archiveRef != null;
+    const otherCount = Object.keys(columnMap).filter(
+      (k) => k !== "title" && k !== "archiveRef"
+    ).length;
+    if (hasTitleOrRef && otherCount >= 1) {
+      return { rowIndex: r, columnMap };
+    }
   }
   return null;
 }
@@ -125,17 +151,7 @@ function matchChapter(sheetName, chapters = []) {
   return { chapterId: null, chapterTitle: null };
 }
 
-// Match "المبحث في خطتك" text to a section within a chapter.
-// The stored `section.title` in CHAPTERS_DATA / DB uses a numbering prefix on
-// every main section ("م1: ...", "م2: ...") and an indent + arrow on sub-sections
-// ("   ↳ ..."). The Excel cell often either uses the same prefix with shorter or
-// paraphrased wording after it, or drops the prefix entirely. Three-tier match:
-//   Tier 1 — deterministic: parse "م<N>" from the Excel cell → build "<chapterId>-<N>"
-//            → direct lookup by id. Always wins if present.
-//   Tier 2 — normalized substring after stripping the numbering prefix and the
-//            "   ↳ " sub-section indent from BOTH sides. Bidirectional.
-//   Tier 3 — token-overlap: after normalization + stop-word removal, pick the
-//            section that shares the largest count of meaningful tokens (≥ 2).
+// Match "المبحث في خطتك" text to a section within a chapter. (Unchanged logic.)
 function matchSection(sectionText, chapter) {
   if (!chapter || !sectionText) return { sectionId: null, sectionTitle: null };
   const secs = chapter.sections || [];
@@ -154,8 +170,8 @@ function matchSection(sectionText, chapter) {
   // Strip prefixes/indent so wording comparisons focus on meaningful text.
   const stripSectionPrefix = (t) =>
     String(t || "")
-      .replace(/^\s*↳\s*/, "")               // sub-section arrow (any leading spaces)
-      .replace(/^\s*م\s*\d+\s*[:：\-]?\s*/, "") // main "م1:" / "م 2 -" prefix
+      .replace(/^\s*↳\s*/, "")
+      .replace(/^\s*م\s*\d+\s*[:：\-]?\s*/, "")
       .trim();
   const qStripped = normalizeAr(stripSectionPrefix(raw));
 
@@ -170,12 +186,10 @@ function matchSection(sectionText, chapter) {
   }
 
   // ---- Tier 3: token-overlap fallback.
-  // Split on whitespace, drop tokens shorter than 3 chars and Arabic stop-words.
   const AR_STOP = new Set([
     "في","من","على","الى","إلى","عن","مع","بين","او","أو","و","أن","ان","ما",
     "هذا","هذه","ذلك","تلك","هو","هي","التي","الذي","الذين","اللواتي","بعد","قبل",
     "خلال","ضمن","حول","نحو","دون","تحت","فوق","الى","الى","ما","لم","لا","لن","قد",
-    // very-common thesis-domain tokens that don't discriminate between sections
     "الخليج","العربي","الحرب","العالمية","الثانية","الفصل","المبحث",
   ]);
   const toTokens = (t) =>
@@ -186,7 +200,7 @@ function matchSection(sectionText, chapter) {
   const qTokens = new Set(toTokens(raw));
   if (qTokens.size >= 2) {
     let best = null;
-    let bestScore = 1; // require at least 2 shared tokens
+    let bestScore = 1;
     for (const s of secs) {
       const sTokens = toTokens(s.title || "");
       let overlap = 0;
@@ -210,7 +224,6 @@ function normalizePriority(raw) {
   if (starCount >= 3) return { stars: "★★★", numeric: 3 };
   if (starCount === 2) return { stars: "★★", numeric: 2 };
   if (starCount === 1) return { stars: "★", numeric: 1 };
-  // fallback: numeric input in cell
   const n = parseInt(s, 10);
   if (n === 3) return { stars: "★★★", numeric: 3 };
   if (n === 2) return { stars: "★★", numeric: 2 };
@@ -232,64 +245,97 @@ export async function parseLibraryExcel(file, { chapters = [] } = {}) {
 
   const dataSheets = [];
   const skippedSheets = [];
+  const sheetErrors = [];
+  const rowErrors = [];
+  let scannedRowCount = 0;
 
   for (const sheetName of wb.SheetNames) {
-    const ws = wb.Sheets[sheetName];
-    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: false });
-    if (!aoa || !aoa.length) {
-      skippedSheets.push({ sheetName, reason: "فارغة" });
-      continue;
-    }
-    const header = detectHeaderRow(aoa);
-    if (!header) {
-      skippedSheets.push({ sheetName, reason: "لا يحتوي على أعمدة عنوان الملف/المرجع الأرشيفي" });
-      continue;
-    }
+    try {
+      const ws = wb.Sheets[sheetName];
+      // blankrows:true keeps every physical row so `r + 1` stays a truthful
+      // reference to the 1-based Excel row number in error messages.
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, blankrows: true });
+      if (!aoa || !aoa.length) {
+        skippedSheets.push({ sheetName, reason: "فارغة" });
+        continue;
+      }
+      const header = detectHeaderRow(aoa);
+      if (!header) {
+        skippedSheets.push({
+          sheetName,
+          reason: "لا يحتوي على أعمدة عنوان الملف/المرجع الأرشيفي في أول 15 صفاً",
+        });
+        continue;
+      }
 
-    const { chapterId, chapterTitle } = matchChapter(sheetName, chapters);
-    const chapter = chapters.find((c) => c.id === chapterId) || null;
-    const colMap = header.columnMap;
-    const rows = [];
+      const { chapterId, chapterTitle } = matchChapter(sheetName, chapters);
+      const chapter = chapters.find((c) => c.id === chapterId) || null;
+      const colMap = header.columnMap;
+      const rows = [];
 
-    for (let r = header.rowIndex + 1; r < aoa.length; r++) {
-      const row = aoa[r] || [];
-      const cell = (field) => (colMap[field] != null ? clean(row[colMap[field]]) : "");
-      const title = cell("title");
-      const archiveRef = cell("archiveRef");
-      if (!title && !archiveRef) continue; // fully empty row
+      for (let r = header.rowIndex + 1; r < aoa.length; r++) {
+        const row = aoa[r];
+        // Genuinely empty rows (all cells null/blank) don't count as scanned.
+        if (!row || row.every((v) => v == null || String(v).trim() === "")) continue;
+        scannedRowCount += 1;
+        try {
+          const cell = (field) => (colMap[field] != null ? clean(row[colMap[field]]) : "");
+          const title = cell("title");
+          const archiveRef = cell("archiveRef");
+          if (!title && !archiveRef) continue; // effectively empty for our purposes
 
-      const priority = normalizePriority(cell("priority"));
-      const sectionText = cell("sectionText");
-      const { sectionId, sectionTitle } = matchSection(sectionText, chapter);
-      const url = qdlUrlForRef(archiveRef);
+          const priority = normalizePriority(cell("priority"));
+          const sectionText = cell("sectionText");
+          const { sectionId, sectionTitle } = matchSection(sectionText, chapter);
+          const url = qdlUrlForRef(archiveRef);
 
-      rows.push({
-        rowIndex: r + 1, // 1-based for user-facing errors
-        title,
-        archiveRef,
-        sectionText,
-        subElement:     cell("subElement"),
-        priorityStars:  priority.stars,
-        priorityNumeric: priority.numeric,
-        sourceType:     cell("sourceType"),
-        isNew:          cell("isNew"),
-        status:         cell("status"),
-        importantPages: cell("importantPages"),
-        notes:          cell("notes"),
-        url,
-        sectionIdMatched: sectionId,
-        sectionTitleMatched: sectionTitle,
+          rows.push({
+            rowIndex: r + 1, // 1-based real Excel row number
+            title,
+            archiveRef,
+            sectionText,
+            subElement:     cell("subElement"),
+            priorityStars:  priority.stars,
+            priorityNumeric: priority.numeric,
+            sourceType:     cell("sourceType"),
+            isNew:          cell("isNew"),
+            status:         cell("status"),
+            importantPages: cell("importantPages"),
+            notes:          cell("notes"),
+            url,
+            sectionIdMatched: sectionId,
+            sectionTitleMatched: sectionTitle,
+          });
+        } catch (rowErr) {
+          rowErrors.push({
+            sheetName,
+            rowIndex: r + 1,
+            reason: rowErr?.message || String(rowErr),
+          });
+        }
+      }
+
+      dataSheets.push({ sheetName, chapterId, chapterTitle, rows });
+    } catch (sheetErr) {
+      sheetErrors.push({
+        sheetName,
+        reason: sheetErr?.message || String(sheetErr),
       });
     }
-
-    dataSheets.push({ sheetName, chapterId, chapterTitle, rows });
   }
 
   const rowCount = dataSheets.reduce((n, s) => n + s.rows.length, 0);
   return {
     dataSheets,
     skippedSheets,
-    totals: { dataSheetCount: dataSheets.length, rowCount },
+    sheetErrors,
+    rowErrors,
+    totals: {
+      dataSheetCount: dataSheets.length,
+      rowCount,
+      scannedRowCount,
+      sheetCount: wb.SheetNames.length,
+    },
   };
 }
 

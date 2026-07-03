@@ -4,7 +4,7 @@ import { callLLM, analyzeDocumentLLM } from "./aiClient";
 import mammoth from "mammoth";
 import SupervisorRoom from "./SupervisorRoom";
 import NotificationBell from "./NotificationBell";
-import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats, getMyRole } from "./cloudSync";
+import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, deleteLibraryRows, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats, getMyRole } from "./cloudSync";
 import { supabase } from "@/integrations/supabase/client";
 import { parseLibraryExcel, buildNotesWithRef, extractRefFromNotes } from "./lib/excelImport";
 
@@ -919,6 +919,11 @@ export default function App() {
   const [libUploading, setLibUploading] = useState(false);
   const [libAnalyzing, setLibAnalyzing] = useState(null); // id المصدر الجاري تحليله
   const [libFilter, setLibFilter] = useState({ query:"", chapterId:"", category:"", priority:"" });
+  // Multi-select for bulk-delete in the Library page. Stores client-side ids
+  // as strings so it survives across type changes (Excel imports use numeric
+  // ids, cloud rows carry string ids).
+  const [libSelectedIds, setLibSelectedIds] = useState(() => new Set());
+  const [libBulkDeleting, setLibBulkDeleting] = useState(false);
   const [libSelected, setLibSelected] = useState(null);
   const [libUrlInput, setLibUrlInput] = useState("");
   const [libUrlLoading, setLibUrlLoading] = useState(false);
@@ -1343,6 +1348,10 @@ ${JSON.stringify(thesisStructure, null, 2)}
               author: "",
               year: "",
               language: "",
+              // Explicit archival reference field — shown on the source card
+              // and used as the dedup key. Also mirrored into notes so older
+              // rows (imported before this field existed) stay compatible.
+              archiveRef: row.archiveRef || "",
               sourceType: row.sourceType || "",
               chapterId: sheet.chapterId,
               sectionId: row.sectionIdMatched || "",
@@ -1387,21 +1396,48 @@ ${JSON.stringify(thesisStructure, null, 2)}
         }
       }
 
-      // Build Arabic summary
+      // Build Arabic summary — MANDATORY numeric breakdown, always shown,
+      // even on full success, so a future silent-failure regression is loud.
       const chapterLines = Object.entries(perChapter)
         .map(([name, c]) => `   • ${name}: مستورد ${c.imported}${c.skipped ? ` — متجاهل (مكرر) ${c.skipped}` : ""}${c.errors ? ` — أخطاء ${c.errors}` : ""}`)
         .join("\n");
       const skippedSheetsLine = parsed.skippedSheets.length
-        ? `\nأوراق تم تخطيها (ليست بيانات): ${parsed.skippedSheets.map(s => s.sheetName).join("، ")}`
+        ? `\nأوراق تم تخطيها (ليست بيانات):\n` +
+          parsed.skippedSheets.map((s) => `   • ${s.sheetName} — ${s.reason}`).join("\n")
         : "";
+      const sheetErrorsLine = (parsed.sheetErrors || []).length
+        ? `\nأوراق فشلت أثناء المعالجة:\n` +
+          parsed.sheetErrors.map((s) => `   • ${s.sheetName} — ${s.reason}`).join("\n")
+        : "";
+      const rowErrorsLine = (parsed.rowErrors || []).length
+        ? `\nصفوف فشلت (${parsed.rowErrors.length}):\n` +
+          parsed.rowErrors.slice(0, 8).map((e) => `   • ${e.sheetName} صف ${e.rowIndex} — ${e.reason}`).join("\n") +
+          (parsed.rowErrors.length > 8 ? `\n   • …و ${parsed.rowErrors.length - 8} أخرى (راجع Console)` : "")
+        : "";
+      // Merge parser row errors into errorCount so the top-line total is truthful.
+      errorCount += (parsed.rowErrors || []).length;
+
+      const t = parsed.totals || {};
       const summary =
         `✅ اكتمل الاستيراد من ${file.name}\n` +
-        `عدد الوثائق المستوردة: ${importedCount}\n` +
-        `عدد التي تم تجاهلها (مكررة): ${skippedDup}\n` +
-        `عدد الأخطاء: ${errorCount}${chapterLines ? "\n\nتوزيع حسب الفصل:\n" + chapterLines : ""}${skippedSheetsLine}`;
+        `تم فحص ${t.scannedRowCount ?? "?"} صف عبر ${t.dataSheetCount ?? "?"} ورقة بيانات (من أصل ${t.sheetCount ?? "?"} ورقة في الملف).\n` +
+        `استيراد ناجح: ${importedCount}\n` +
+        `تجاهل (مكرر): ${skippedDup}\n` +
+        `فشل: ${errorCount}` +
+        (chapterLines ? `\n\nتوزيع حسب الفصل:\n${chapterLines}` : "") +
+        skippedSheetsLine +
+        sheetErrorsLine +
+        rowErrorsLine;
 
       showNotif(summary, importedCount ? "success" : "warn");
-      console.log("[excel-import-summary]", { importedCount, skippedDup, errorCount, perChapter, skippedSheets: parsed.skippedSheets });
+      console.log("[excel-import-summary]", {
+        importedCount, skippedDup, errorCount,
+        perChapter,
+        totals: parsed.totals,
+        skippedSheets: parsed.skippedSheets,
+        sheetErrors: parsed.sheetErrors,
+        rowErrors: parsed.rowErrors,
+      });
     } catch (err) {
       console.error("[handleLibExcelImport]", err);
       showNotif("⚠️ تعذّر قراءة ملف الإكسل — تأكد من صيغة .xlsx", "error");
@@ -1429,6 +1465,45 @@ ${JSON.stringify(thesisStructure, null, 2)}
       if (error) showNotif("⚠️ فشل حذف المصدر من السحابة", "error");
     });
     showNotif("🗑️ تم حذف المصدر");
+  };
+
+  // ---- Multi-select helpers for the Library page ----------------------------
+  const toggleLibSelect = (id) => {
+    setLibSelectedIds(prev => {
+      const next = new Set(prev);
+      const key = String(id);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const clearLibSelection = () => setLibSelectedIds(new Set());
+  const selectAllFilteredLib = (ids) => {
+    setLibSelectedIds(new Set(ids.map(String)));
+  };
+  const bulkDeleteSelectedLib = async () => {
+    if (libSelectedIds.size === 0) return;
+    const ids = Array.from(libSelectedIds);
+    const idSetStr = new Set(ids);
+    const targets = library.filter(s => idSetStr.has(String(s.id)));
+    setLibBulkDeleting(true);
+    // Optimistic local removal
+    setLibrary(prev => prev.filter(s => !idSetStr.has(String(s.id))));
+    if (libSelected && idSetStr.has(String(libSelected.id))) setLibSelected(null);
+    // Best-effort Storage cleanup for any attached files
+    for (const t of targets) {
+      if (t?.storagePath) { deleteLibraryFile(t.storagePath).catch(() => {}); }
+    }
+    try {
+      const { error, count } = await deleteLibraryRows(ids);
+      if (error) {
+        showNotif(`⚠️ فشل حذف ${ids.length} مصدر من السحابة — أُزيلت محلياً فقط`, "error");
+      } else {
+        showNotif(`🗑️ تم حذف ${count} مصدر`);
+      }
+    } finally {
+      clearLibSelection();
+      setLibBulkDeleting(false);
+    }
   };
 
 
@@ -4137,6 +4212,43 @@ ${docsContext}
               </div>
             )}
 
+            {/* شريط التحديد المتعدد — يظهر فقط عند تحديد مصدر أو أكثر */}
+            {library.length > 0 && libSelectedIds.size > 0 && (() => {
+              const filteredIds = filteredLib.map(s => String(s.id));
+              const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => libSelectedIds.has(id));
+              return (
+                <div data-testid="lib-bulk-toolbar" style={{background:"#eef2ff",borderRadius:10,padding:"10px 14px",border:"0.5px solid #c7d2fe",marginBottom:12,display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+                  <div data-testid="lib-bulk-count" style={{fontWeight:700,color:"#4338ca",fontSize:13}}>
+                    محدد: {libSelectedIds.size} مصدر
+                  </div>
+                  <div style={{flex:1}} />
+                  <button
+                    data-testid="lib-bulk-toggle-all"
+                    onClick={() => allFilteredSelected ? clearLibSelection() : selectAllFilteredLib(filteredIds)}
+                    style={{padding:"6px 12px",borderRadius:7,background:"white",color:"#4338ca",border:"0.5px solid #c7d2fe",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
+                    {allFilteredSelected ? "إلغاء تحديد الكل" : `تحديد الكل (${filteredIds.length})`}
+                  </button>
+                  <button
+                    data-testid="lib-bulk-clear"
+                    onClick={clearLibSelection}
+                    style={{padding:"6px 12px",borderRadius:7,background:"white",color:"#475569",border:"0.5px solid #cbd5e1",cursor:"pointer",fontFamily:"inherit",fontSize:12,fontWeight:600}}>
+                    مسح التحديد
+                  </button>
+                  <button
+                    data-testid="lib-bulk-delete"
+                    disabled={libBulkDeleting}
+                    onClick={() => setConfirmDialog({
+                      title: "تأكيد الحذف الجماعي",
+                      message: `هل تريد حذف ${libSelectedIds.size} مصدر؟\nلا يمكن التراجع عن هذا الإجراء.`,
+                      onConfirm: () => bulkDeleteSelectedLib(),
+                    })}
+                    style={{padding:"7px 14px",borderRadius:7,background:libBulkDeleting?"#94a3b8":"#dc2626",color:"white",border:"none",cursor:libBulkDeleting?"not-allowed":"pointer",fontFamily:"inherit",fontSize:12,fontWeight:700}}>
+                    {libBulkDeleting ? "⏳ جاري الحذف..." : `🗑️ حذف المحدد (${libSelectedIds.size})`}
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* قائمة المصادر */}
             {library.length === 0 ? (
               <div style={{background:"white",borderRadius:12,padding:50,textAlign:"center",border:"0.5px solid #e2e8f0"}}>
@@ -4153,16 +4265,30 @@ ${docsContext}
                     <div key={src.id} style={{background:"white",borderRadius:12,border:`0.5px solid ${libSelected?.id===src.id?"#3B82F6":"#e2e8f0"}`,overflow:"hidden"}}>
                       {/* رأس البطاقة */}
                       <div onClick={()=>setLibSelected(libSelected?.id===src.id?null:src)} style={{padding:"12px 16px",cursor:"pointer",display:"flex",gap:10,alignItems:"flex-start"}}>
+                        <input
+                          type="checkbox"
+                          data-testid={`lib-card-checkbox-${src.id}`}
+                          checked={libSelectedIds.has(String(src.id))}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={() => toggleLibSelect(src.id)}
+                          style={{marginTop:8,cursor:"pointer",width:16,height:16,flexShrink:0,accentColor:"#3B82F6"}}
+                          aria-label="تحديد هذا المصدر"
+                        />
                         <div style={{fontSize:28,flexShrink:0}}>
                           {src.fileType==="pdf"?"📕":src.fileType==="url"?"🌐":src.fileType==="md"?"📝":"📄"}
                         </div>
                         <div style={{flex:1,minWidth:0}}>
                           <div style={{fontWeight:600,fontSize:13,marginBottom:4}}>{src.title || src.fileName}</div>
+                          {(src.archiveRef || extractRefFromNotes(src.notes)) && (
+                            <div data-testid="lib-card-archive-ref" style={{fontSize:11,fontFamily:"ui-monospace, Menlo, Consolas, monospace",color:"#334155",background:"#eef2ff",display:"inline-block",padding:"2px 8px",borderRadius:5,marginBottom:5,direction:"ltr"}}>
+                              📎 {src.archiveRef || extractRefFromNotes(src.notes)}
+                            </div>
+                          )}
                           <div style={{display:"flex",gap:6,flexWrap:"wrap",fontSize:11,color:"#64748b"}}>
                             {src.author && <span>👤 {src.author}</span>}
                             {src.year && <span>📅 {src.year}</span>}
                             {src.language && <span>🌐 {src.language}</span>}
-                            {src.sourceType && <span style={{background:"#f1f5f9",borderRadius:4,padding:"1px 6px"}}>{src.sourceType}</span>}
+                            {src.sourceType && <span data-testid="lib-card-source-type" style={{background:"#f1f5f9",borderRadius:4,padding:"1px 6px"}}>{src.sourceType}</span>}
                           </div>
                           <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}>
                             {src.priority && <span style={{background:src.priority==="★★★"?"#dcfce7":src.priority==="★★"?"#fef9c3":"#f1f5f9",color:src.priority==="★★★"?"#16a34a":src.priority==="★★"?"#ca8a04":"#94a3b8",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{src.priority}</span>}
