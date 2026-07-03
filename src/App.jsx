@@ -801,40 +801,37 @@ export default function App() {
   // library save fails, revealing the exact error class (rls/jwt/network).
   const libDiagShownRef = useRef(false);
 
-  // Phase 3b: load library from cloud once on mount + reconcile LS mirror
+  // Phase 3b: load library from cloud once on mount.
+  //
+  // IMPORTANT (Jan-2026 fix — "deleted items reappear" bug):
+  // Cloud is the SINGLE SOURCE OF TRUTH. We no longer resurrect LS-only
+  // items on hydration — that path was silently pushing deleted sources
+  // back into the UI because after a successful cloud delete the row was
+  // removed from cloud but still present in the pre-delete localStorage
+  // snapshot. Now we PULL from cloud → replace local state → then rewrite
+  // LS from the fresh cloud snapshot. Any LS-only entry is treated as
+  // stale and discarded (user was offline when they created it? they can
+  // re-add — but silent resurrection of deleted rows is far worse).
   React.useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const items = await loadLibrary();
         if (cancelled) return;
-        if (items && items.length) {
-          // Reconcile: any LS item whose id isn't in cloud results is a
-          // pending unsaved source — keep it in state and mark pending.
-          const cloudIds = new Set(items.map(x => String(x.id)));
-          const lsOnly = readLibLS().filter(x => !cloudIds.has(String(x.id)));
-          if (lsOnly.length) {
-            console.info(`[library.reconcile] ${lsOnly.length} local source(s) missing from cloud — will retry.`);
-            setPendingLibIds(prev => {
-              const next = new Set(prev);
-              lsOnly.forEach(x => next.add(String(x.id)));
-              return next;
-            });
-          }
-          setLibrary([...lsOnly, ...items]);
-        }
-        // If cloud returned nothing but LS has items, keep them and mark all pending.
-        else {
-          const lsItems = readLibLS();
-          if (lsItems.length) {
-            console.info(`[library.reconcile] cloud empty, ${lsItems.length} local source(s) will be retried.`);
-            setPendingLibIds(prev => {
-              const next = new Set(prev);
-              lsItems.forEach(x => next.add(String(x.id)));
-              return next;
-            });
-          }
-        }
+        // Replace state with the exact cloud snapshot (empty is a valid
+        // state — cloud has zero rows means UI shows zero rows).
+        setLibrary(items || []);
+        // Also refresh LS mirror to match cloud, so a future reload does
+        // not see stale LS entries.
+        try {
+          const stripped = (items || []).map(s => {
+            const { fileData, ...rest } = s;
+            return rest;
+          });
+          window.localStorage.setItem(LIB_LS_KEY, JSON.stringify(stripped));
+        } catch (e) { console.warn("[library.LS.rewrite]", e); }
+        // Clear any stale pending markers — cloud is authoritative now.
+        setPendingLibIds(new Set());
       } catch (e) { console.warn("[loadLibrary]", e); }
       finally { libHydratedRef.current = true; }
     })();
@@ -1313,9 +1310,12 @@ ${JSON.stringify(thesisStructure, null, 2)}
       const parsed = await parseLibraryExcel(file, { chapters });
 
       // Build a set of already-imported archive refs (dedup key).
+      // Read from BOTH the explicit `archiveRef` field (new schema) and the
+      // legacy `notes`-embedded ref (older imports before the field existed).
+      // Empty refs are never tracked, so empty-vs-empty is never a match.
       const existingRefs = new Set();
       for (const src of library) {
-        const ref = extractRefFromNotes(src.notes);
+        const ref = src.archiveRef || extractRefFromNotes(src.notes);
         if (ref) existingRefs.add(ref);
       }
 
@@ -1326,10 +1326,12 @@ ${JSON.stringify(thesisStructure, null, 2)}
       const toInsert = [];
 
       for (const sheet of parsed.dataSheets) {
-        const chKey = sheet.chapterTitle || sheet.sheetName;
-        if (!perChapter[chKey]) perChapter[chKey] = { imported: 0, skipped: 0, errors: 0 };
-
         for (const row of sheet.rows) {
+          // Group summary by per-row chapter title when available; fall back
+          // to sheet-level (legacy) or sheet name.
+          const chKey = row.chapterTitleFromRow || sheet.chapterTitle || sheet.sheetName;
+          if (!perChapter[chKey]) perChapter[chKey] = { imported: 0, skipped: 0, errors: 0 };
+
           if (row.archiveRef && existingRefs.has(row.archiveRef)) {
             skippedDup += 1;
             perChapter[chKey].skipped += 1;
@@ -1353,7 +1355,9 @@ ${JSON.stringify(thesisStructure, null, 2)}
               // rows (imported before this field existed) stay compatible.
               archiveRef: row.archiveRef || "",
               sourceType: row.sourceType || "",
-              chapterId: sheet.chapterId,
+              // Per-row chapter overrides sheet-level chapter (new single-
+              // sheet workbooks carry chapter per row via "الفصل" column).
+              chapterId: row.chapterIdFromRow != null ? row.chapterIdFromRow : sheet.chapterId,
               sectionId: row.sectionIdMatched || "",
               subSectionId: "",
               sections: row.sectionTitleMatched ? [row.sectionTitleMatched] : [],
@@ -1367,7 +1371,13 @@ ${JSON.stringify(thesisStructure, null, 2)}
               notes: buildNotesWithRef(row.archiveRef, row.notes),
             };
             toInsert.push(src);
-            if (row.archiveRef) existingRefs.add(row.archiveRef);
+            // NOTE: dedup is ONLY against the existing library (cloud state)
+            // captured before this import started. We deliberately do NOT
+            // add row.archiveRef to existingRefs after each iteration — so
+            // an in-file archiveRef collision (two distinct rows sharing a
+            // ref) still results in both rows being imported. Intra-file
+            // dedup would silently drop legitimate distinct documents that
+            // happen to live inside the same archive folder.
             importedCount += 1;
             perChapter[chKey].imported += 1;
           } catch (rowErr) {
@@ -1456,14 +1466,29 @@ ${JSON.stringify(thesisStructure, null, 2)}
     });
   };
 
-  const deleteLibSrc = (id) => {
+  // Cloud-first delete: await Supabase confirmation BEFORE mutating local
+  // state or UI. On failure, item remains visible with a clear error. This
+  // eliminates the "deleted item comes back after refresh" bug, which was
+  // caused by optimistic removal + LS resurrection on hydration.
+  const deleteLibSrc = async (id) => {
     const target = library.find(s => s.id === id);
-    if (target?.storagePath) { deleteLibraryFile(target.storagePath).catch(() => {}); }
+    // Try cloud delete first. If the row was never in the cloud (still
+    // pending), the delete is a no-op and returns no error — safe.
+    const { error } = await deleteLibraryRow(id);
+    if (error) {
+      showNotif("⚠️ فشل الحذف، حاول مجدداً", "error");
+      return;
+    }
+    // Cloud confirmed → now remove locally.
     setLibrary(prev => prev.filter(s => s.id !== id));
     if (libSelected?.id === id) setLibSelected(null);
-    deleteLibraryRow(id).then(({ error }) => {
-      if (error) showNotif("⚠️ فشل حذف المصدر من السحابة", "error");
+    setPendingLibIds(prev => {
+      const next = new Set(prev);
+      next.delete(String(id));
+      return next;
     });
+    // Best-effort Storage cleanup (fire-and-forget — the row is gone).
+    if (target?.storagePath) { deleteLibraryFile(target.storagePath).catch(() => {}); }
     showNotif("🗑️ تم حذف المصدر");
   };
 
@@ -1480,28 +1505,35 @@ ${JSON.stringify(thesisStructure, null, 2)}
   const selectAllFilteredLib = (ids) => {
     setLibSelectedIds(new Set(ids.map(String)));
   };
+  // Cloud-first bulk delete. Same contract as deleteLibSrc: await cloud,
+  // only remove locally on success.
   const bulkDeleteSelectedLib = async () => {
     if (libSelectedIds.size === 0) return;
     const ids = Array.from(libSelectedIds);
     const idSetStr = new Set(ids);
     const targets = library.filter(s => idSetStr.has(String(s.id)));
     setLibBulkDeleting(true);
-    // Optimistic local removal
-    setLibrary(prev => prev.filter(s => !idSetStr.has(String(s.id))));
-    if (libSelected && idSetStr.has(String(libSelected.id))) setLibSelected(null);
-    // Best-effort Storage cleanup for any attached files
-    for (const t of targets) {
-      if (t?.storagePath) { deleteLibraryFile(t.storagePath).catch(() => {}); }
-    }
     try {
       const { error, count } = await deleteLibraryRows(ids);
       if (error) {
-        showNotif(`⚠️ فشل حذف ${ids.length} مصدر من السحابة — أُزيلت محلياً فقط`, "error");
-      } else {
-        showNotif(`🗑️ تم حذف ${count} مصدر`);
+        showNotif(`⚠️ فشل حذف ${ids.length} مصدر — حاول مجدداً`, "error");
+        return;
       }
-    } finally {
+      // Cloud confirmed → now remove locally.
+      setLibrary(prev => prev.filter(s => !idSetStr.has(String(s.id))));
+      if (libSelected && idSetStr.has(String(libSelected.id))) setLibSelected(null);
+      setPendingLibIds(prev => {
+        const next = new Set(prev);
+        for (const k of idSetStr) next.delete(k);
+        return next;
+      });
+      // Best-effort Storage cleanup for any attached files
+      for (const t of targets) {
+        if (t?.storagePath) { deleteLibraryFile(t.storagePath).catch(() => {}); }
+      }
       clearLibSelection();
+      showNotif(`🗑️ تم حذف ${count} مصدر`);
+    } finally {
       setLibBulkDeleting(false);
     }
   };

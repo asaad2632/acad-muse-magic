@@ -34,6 +34,7 @@ import * as XLSX from "xlsx";
 // ---- constants -------------------------------------------------------------
 const HEADER_ALIASES = {
   serial:         ["م", "#", "الرقم"],
+  chapter:        ["الفصل", "رقم الفصل"],
   title:          ["عنوان الملف", "العنوان", "اسم الملف", "عنوان المصدر", "عنوان الوثيقة"],
   archiveRef:     ["المرجع الأرشيفي", "المرجع", "الرقم الأرشيفي", "رقم الوثيقة", "رقم الوثيقة الأرشيفية"],
   sectionText:    ["المبحث في خطتك", "المبحث", "الفرع", "المبحث في الخطة"],
@@ -77,18 +78,37 @@ function normalizeAr(s) {
 }
 
 // Try to identify a field name from a header cell using alias matching.
+// Two-pass strategy so single-character aliases (e.g. "م" for serial, "#")
+// don't spuriously match inside longer Arabic headers ("الملف", "المبحث").
+//   Pass 1: exact equality with any alias — highest confidence.
+//   Pass 2: substring match, BUT only when the alias is ≥ 3 characters, so
+//           short noise-aliases never win over real headers.
 function fieldOfCell(cellNorm) {
   if (!cellNorm) return null;
+  // Pass 1: exact.
   for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
     for (const a of aliases) {
       const an = normalizeAr(a);
-      if (!an) continue;
-      if (cellNorm === an || cellNorm.includes(an) || an.includes(cellNorm)) {
-        return field;
+      if (an && cellNorm === an) return field;
+    }
+  }
+  // Pass 2: substring (only for aliases ≥ 3 chars). Longest alias wins so a
+  // more specific header ("عنوان الملف") beats a subset ("العنوان").
+  let bestField = null;
+  let bestLen = 0;
+  for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+    for (const a of aliases) {
+      const an = normalizeAr(a);
+      if (!an || an.length < 3) continue;
+      if (cellNorm.includes(an) || an.includes(cellNorm)) {
+        if (an.length > bestLen) {
+          bestLen = an.length;
+          bestField = field;
+        }
       }
     }
   }
-  return null;
+  return bestField;
 }
 
 // Locate the header row in a sheet-of-arrays. Scans first HEADER_SCAN_LIMIT
@@ -281,13 +301,26 @@ export async function parseLibraryExcel(file, { chapters = [] } = {}) {
         try {
           const cell = (field) => (colMap[field] != null ? clean(row[colMap[field]]) : "");
           const title = cell("title");
+          // NEW REQUIREMENT (Priority 1 lock): title is the ONLY mandatory
+          // field. Rows without a title (e.g. lonely archive refs with no
+          // descriptive title) are skipped as they are not usable sources.
+          if (!title) continue;
           const archiveRef = cell("archiveRef");
-          if (!title && !archiveRef) continue; // effectively empty for our purposes
 
           const priority = normalizePriority(cell("priority"));
           const sectionText = cell("sectionText");
-          const { sectionId, sectionTitle } = matchSection(sectionText, chapter);
           const url = qdlUrlForRef(archiveRef);
+
+          // Per-row chapter: parse from "الفصل" column if present. Falls back
+          // to whatever chapter the sheet name matched (legacy multi-sheet
+          // files). Single-sheet workbooks with a "الفصل" column now resolve
+          // chapter per row.
+          const chapterCell = cell("chapter");
+          const rowChapterMatch = chapterCell ? matchChapter(chapterCell, chapters) : null;
+          const effectiveChapter = rowChapterMatch && rowChapterMatch.chapterId != null
+            ? chapters.find((c) => c.id === rowChapterMatch.chapterId) || null
+            : chapter;
+          const { sectionId, sectionTitle } = matchSection(sectionText, effectiveChapter);
 
           rows.push({
             rowIndex: r + 1, // 1-based real Excel row number
@@ -303,6 +336,8 @@ export async function parseLibraryExcel(file, { chapters = [] } = {}) {
             importantPages: cell("importantPages"),
             notes:          cell("notes"),
             url,
+            chapterIdFromRow: rowChapterMatch ? rowChapterMatch.chapterId : null,
+            chapterTitleFromRow: rowChapterMatch ? rowChapterMatch.chapterTitle : null,
             sectionIdMatched: sectionId,
             sectionTitleMatched: sectionTitle,
           });
