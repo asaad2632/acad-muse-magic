@@ -1575,7 +1575,11 @@ ${JSON.stringify(thesisStructure, null, 2)}
         sectionId: secId,
         section: s.section || (Array.isArray(s.sections) ? s.sections.join("، ") : ""),
         priority: s.priority || "★★",
-        category: s.sourceType || s.category || "كتاب",
+        // Preserve the source's real type. Also expose it under `sourceType`
+        // so the structure page can pick it up directly (falls back to
+        // legacy `category` for base docs).
+        sourceType: s.sourceType || s.category || "",
+        category: s.sourceType || s.category || "",
         isNew: true,
         status: s.status || (s.analyzed ? "تم التحليل ✅" : "لم يُراجع"),
         notes: s.summary || s.whyImportant || "",
@@ -3321,8 +3325,9 @@ ${docsContext}
                                   <span style={{background:pBg(d.priority),color:pColor(d.priority),borderRadius:4,padding:"1px 5px",fontSize:9,fontWeight:700,flexShrink:0,marginTop:2}}>{d.priority}</span>
                                   <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>{setSelectedDoc(d);setPage("detail");}}>
                                     <div style={{fontSize:12,fontWeight:500,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.title}</div>
-                                    <div style={{display:"flex",gap:6,fontSize:10,color:"#94a3b8",flexWrap:"wrap"}}>
-                                      {d.archiveRef&&<span style={{color:"#8B5CF6",fontFamily:"monospace"}}>{d.archiveRef}</span>}
+                                    <div style={{display:"flex",gap:6,fontSize:10,color:"#94a3b8",flexWrap:"wrap",alignItems:"center"}}>
+                                      {d.archiveRef&&<span data-testid={`struct-doc-archive-ref-${d.id}`} style={{color:"#8B5CF6",fontFamily:"monospace",direction:"ltr"}}>📎 {d.archiveRef}</span>}
+                                      {(d.sourceType||d.category)&&<span data-testid={`struct-doc-source-type-${d.id}`} style={{background:"#f1f5f9",color:"#475569",borderRadius:4,padding:"1px 6px"}}>{d.sourceType||d.category}</span>}
                                       {d.isNew&&<span style={{color:"#16a34a"}}>🆕 جديد</span>}
                                       {d.notes&&<span>{d.notes.substring(0,50)}{d.notes.length>50?"...":""}</span>}
                                     </div>
@@ -3365,7 +3370,10 @@ ${docsContext}
                               <div key={d.id} style={{display:"flex",gap:8,alignItems:"center",padding:"6px 10px",background:"white",borderRadius:6,border:"0.5px solid #dbeafe"}}>
                                 <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>{setSelectedDoc(d);setPage("detail");}}>
                                   <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{d.title}</div>
-                                  {d.archiveRef && <div style={{fontSize:10,color:"#8B5CF6",fontFamily:"monospace"}}>{d.archiveRef}</div>}
+                                  <div style={{display:"flex",gap:6,fontSize:10,flexWrap:"wrap",alignItems:"center",marginTop:2}}>
+                                    {d.archiveRef && <span data-testid={`struct-unclassified-archive-ref-${d.id}`} style={{color:"#8B5CF6",fontFamily:"monospace",direction:"ltr"}}>📎 {d.archiveRef}</span>}
+                                    {(d.sourceType||d.category) && <span data-testid={`struct-unclassified-source-type-${d.id}`} style={{background:"#f1f5f9",color:"#475569",borderRadius:4,padding:"1px 6px"}}>{d.sourceType||d.category}</span>}
+                                  </div>
                                 </div>
                                 <button onClick={e=>{e.stopPropagation();openFootnoteModal(d);}} title="توليد هامش" style={{padding:"3px 8px",borderRadius:5,background:"#faf5ff",border:"0.5px solid #d8b4fe",color:"#7C3AED",cursor:"pointer",fontSize:10,fontFamily:"inherit"}}>📝</button>
                                 <button onClick={e=>{e.stopPropagation();askDeleteSource(d.id);}} title="حذف" style={{padding:"3px 8px",borderRadius:5,background:"#fee2e2",border:"0.5px solid #fecaca",color:"#dc2626",cursor:"pointer",fontSize:10,fontFamily:"inherit"}}>🗑️</button>
@@ -4432,10 +4440,29 @@ ${docsContext}
                                     <input value={src.importantPages||""} onChange={e=>updateLibSrc(src.id,{importantPages:e.target.value})} placeholder="مثال: 45-67، 102، 230" style={{width:"100%",padding:"5px 8px",borderRadius:6,border:"0.5px solid #cbd5e1",fontSize:11,fontFamily:"inherit",boxSizing:"border-box"}}/>
                                   </div>
                                   <div>
+                                    <label style={{fontSize:10,color:"#94a3b8",display:"block",marginBottom:3}}>رقم الوثيقة (المرجع الأرشيفي)</label>
+                                    <input
+                                      data-testid={`lib-edit-archive-ref-${src.id}`}
+                                      value={src.archiveRef||""}
+                                      onChange={e=>updateLibSrc(src.id,{archiveRef:e.target.value})}
+                                      placeholder="مثال: IOR/R/15/2/656"
+                                      dir="ltr"
+                                      style={{width:"100%",padding:"5px 8px",borderRadius:6,border:"0.5px solid #cbd5e1",fontSize:11,fontFamily:"ui-monospace, Menlo, Consolas, monospace",boxSizing:"border-box",textAlign:"left"}}
+                                    />
+                                  </div>
+                                  <div>
                                     <label style={{fontSize:10,color:"#94a3b8",display:"block",marginBottom:3}}>نوع المصدر</label>
-                                    <select value={src.sourceType||""} onChange={e=>updateLibSrc(src.id,{sourceType:e.target.value})} style={{width:"100%",padding:"5px 8px",borderRadius:6,border:"0.5px solid #cbd5e1",fontSize:11,fontFamily:"inherit"}}>
-                                      {["كتاب عربي","كتاب أجنبي","رسالة ماجستير","أطروحة دكتوراه","بحث علمي","مجلة علمية","مؤتمر علمي","صحيفة","موقع إلكتروني","موسوعة","وثيقة أرشيفية","تقرير رسمي","مصدر أولي"].map(t=><option key={t} value={t}>{t}</option>)}
-                                    </select>
+                                    <input
+                                      data-testid={`lib-edit-source-type-${src.id}`}
+                                      list={`src-type-options-${src.id}`}
+                                      value={src.sourceType||""}
+                                      onChange={e=>updateLibSrc(src.id,{sourceType:e.target.value})}
+                                      placeholder="مصدر أولي / كتاب / بحث محكم..."
+                                      style={{width:"100%",padding:"5px 8px",borderRadius:6,border:"0.5px solid #cbd5e1",fontSize:11,fontFamily:"inherit",boxSizing:"border-box"}}
+                                    />
+                                    <datalist id={`src-type-options-${src.id}`}>
+                                      {["مصدر أولي","وثيقة أرشيفية","كتاب عربي","كتاب أجنبي","رسالة ماجستير","أطروحة دكتوراه","بحث علمي","مجلة علمية","مؤتمر علمي","صحيفة","موقع إلكتروني","موسوعة","تقرير رسمي"].map(t=><option key={t} value={t}/>)}
+                                    </datalist>
                                   </div>
                                   <div style={{gridColumn:"1/-1"}}>
                                     <label style={{fontSize:10,color:"#94a3b8",display:"block",marginBottom:3}}>ملاحظات إضافية</label>
