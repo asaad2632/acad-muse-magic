@@ -3,7 +3,7 @@ import { t as supabase } from "./client-BfzyRf7F.mjs";
 import { n as require_jsx_runtime, r as require_react, t as QueryClientProvider } from "../_libs/react+tanstack__react-query.mjs";
 import { _ as useRouter, c as HeadContent, d as Outlet, f as lazyRouteComponent, h as Link, k as redirect, m as createRootRouteWithContext, p as createFileRoute, s as Scripts, u as createRouter } from "../_libs/@tanstack/react-router+[...].mjs";
 import { t as QueryClient } from "../_libs/tanstack__query-core.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/router-CvtdR7wP.js
+//#region node_modules/.nitro/vite/services/ssr/assets/router-BWb3MqJp.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var styles_default = "/assets/styles-Cg_Suus3.css";
@@ -186,7 +186,7 @@ var Route$2 = createFileRoute("/_authenticated")({
 	},
 	component: lazyRouteComponent($$splitComponentImporter$1, "component")
 });
-var $$splitComponentImporter = () => import("../_authenticated-BlBDe0np.mjs");
+var $$splitComponentImporter = () => import("../_authenticated-DZ2qeoHq.mjs");
 var Route$1 = createFileRoute("/_authenticated/")({ component: lazyRouteComponent($$splitComponentImporter, "component") });
 function toOpenAIMessages(messages, system, allowMultimodal = false) {
 	const msgs = [];

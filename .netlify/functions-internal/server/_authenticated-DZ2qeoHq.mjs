@@ -3,7 +3,7 @@ import { t as supabase } from "./_ssr/client-BfzyRf7F.mjs";
 import { n as require_jsx_runtime, r as require_react } from "./_libs/react+tanstack__react-query.mjs";
 import { t as require_lib } from "./_libs/mammoth+[...].mjs";
 import { n as utils, t as readSync } from "./_libs/xlsx.mjs";
-//#region node_modules/.nitro/vite/services/ssr/assets/_authenticated-BlBDe0np.js
+//#region node_modules/.nitro/vite/services/ssr/assets/_authenticated-DZ2qeoHq.js
 var import_react = /* @__PURE__ */ __toESM(require_react());
 var import_jsx_runtime = require_jsx_runtime();
 var import_lib = /* @__PURE__ */ __toESM(require_lib());
@@ -450,6 +450,24 @@ async function deleteLibraryRow(clientId) {
 	const { error } = await supabase.from("library_sources").delete().eq("user_id", userId).eq("client_id", String(clientId));
 	if (error) console.warn("[deleteLibraryRow]", error);
 	return { error };
+}
+async function deleteLibraryRows(clientIds) {
+	const userId = await uid$1();
+	if (!userId) return {
+		error: /* @__PURE__ */ new Error("no-user"),
+		count: 0
+	};
+	const ids = (clientIds || []).map((x) => String(x)).filter(Boolean);
+	if (!ids.length) return {
+		error: null,
+		count: 0
+	};
+	const { error } = await supabase.from("library_sources").delete().eq("user_id", userId).in("client_id", ids);
+	if (error) console.warn("[deleteLibraryRows]", error);
+	return {
+		error,
+		count: ids.length
+	};
 }
 async function loadByClientId(table) {
 	if (!await uid$1()) return [];
@@ -3160,7 +3178,6 @@ function NotificationBell({ onOpenSupervisor }) {
 		})]
 	});
 }
-var REQUIRED_HEADERS = ["عنوان الملف", "المرجع الأرشيفي"];
 var HEADER_ALIASES = {
 	serial: [
 		"م",
@@ -3170,35 +3187,43 @@ var HEADER_ALIASES = {
 	title: [
 		"عنوان الملف",
 		"العنوان",
-		"اسم الملف"
+		"اسم الملف",
+		"عنوان المصدر",
+		"عنوان الوثيقة"
 	],
 	archiveRef: [
 		"المرجع الأرشيفي",
 		"المرجع",
-		"الرقم الأرشيفي"
+		"الرقم الأرشيفي",
+		"رقم الوثيقة",
+		"رقم الوثيقة الأرشيفية"
 	],
 	sectionText: [
 		"المبحث في خطتك",
 		"المبحث",
-		"الفرع"
+		"الفرع",
+		"المبحث في الخطة"
 	],
 	subElement: [
 		"العنصر الفرعي",
 		"الفقرة",
-		"المطلب"
+		"المطلب",
+		"العنصر"
 	],
 	priority: ["الأولوية", "الأهمية"],
 	sourceType: [
 		"نوع الوثيقة",
 		"نوع المصدر",
-		"النوع"
+		"النوع",
+		"التصنيف"
 	],
 	isNew: ["جديد؟", "جديد"],
 	status: ["الحالة"],
 	importantPages: [
 		"الأوراق المفيدة",
 		"الصفحات المفيدة",
-		"الأوراق"
+		"الأوراق",
+		"الصفحات"
 	],
 	notes: ["ملاحظات", "الملاحظات"]
 };
@@ -3226,24 +3251,34 @@ var AR_ORDINALS = {
 	"العاشر": 10,
 	"العاشرة": 10
 };
+var HEADER_SCAN_LIMIT = 15;
 var clean = (v) => v == null ? "" : String(v).replace(/\s+/g, " ").trim();
 function normalizeAr(s) {
-	return clean(s).replace(/[\u064B-\u0652\u0670]/g, "").replace(/[إأآا]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[«»"'،.]/g, "").toLowerCase();
+	return clean(s).replace(/[\u064B-\u0652\u0670]/g, "").replace(/[إأآا]/g, "ا").replace(/ى/g, "ي").replace(/ة/g, "ه").replace(/[«»"'،.؛:؟]/g, "").toLowerCase();
+}
+function fieldOfCell(cellNorm) {
+	if (!cellNorm) return null;
+	for (const [field, aliases] of Object.entries(HEADER_ALIASES)) for (const a of aliases) {
+		const an = normalizeAr(a);
+		if (!an) continue;
+		if (cellNorm === an || cellNorm.includes(an) || an.includes(cellNorm)) return field;
+	}
+	return null;
 }
 function detectHeaderRow(rows) {
-	const scanLimit = Math.min(rows.length, 8);
+	const scanLimit = Math.min(rows.length, HEADER_SCAN_LIMIT);
 	for (let r = 0; r < scanLimit; r++) {
 		const cells = (rows[r] || []).map(clean);
 		if (!cells.length) continue;
 		const cellsNorm = cells.map(normalizeAr);
-		if (!REQUIRED_HEADERS.every((h) => cellsNorm.some((c) => c.includes(normalizeAr(h))))) continue;
 		const columnMap = {};
-		for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-			const aliasesNorm = aliases.map(normalizeAr);
-			const idx = cellsNorm.findIndex((c) => aliasesNorm.some((a) => c === a || c.includes(a)));
-			if (idx !== -1) columnMap[field] = idx;
+		for (let c = 0; c < cellsNorm.length; c++) {
+			const f = fieldOfCell(cellsNorm[c]);
+			if (f && columnMap[f] == null) columnMap[f] = c;
 		}
-		return {
+		const hasTitleOrRef = columnMap.title != null || columnMap.archiveRef != null;
+		const otherCount = Object.keys(columnMap).filter((k) => k !== "title" && k !== "archiveRef").length;
+		if (hasTitleOrRef && otherCount >= 1) return {
 			rowIndex: r,
 			columnMap
 		};
@@ -3440,12 +3475,15 @@ async function parseLibraryExcel(file, { chapters = [] } = {}) {
 	const wb = readSync(await file.arrayBuffer(), { type: "array" });
 	const dataSheets = [];
 	const skippedSheets = [];
-	for (const sheetName of wb.SheetNames) {
+	const sheetErrors = [];
+	const rowErrors = [];
+	let scannedRowCount = 0;
+	for (const sheetName of wb.SheetNames) try {
 		const ws = wb.Sheets[sheetName];
 		const aoa = utils.sheet_to_json(ws, {
 			header: 1,
 			defval: null,
-			blankrows: false
+			blankrows: true
 		});
 		if (!aoa || !aoa.length) {
 			skippedSheets.push({
@@ -3458,7 +3496,7 @@ async function parseLibraryExcel(file, { chapters = [] } = {}) {
 		if (!header) {
 			skippedSheets.push({
 				sheetName,
-				reason: "لا يحتوي على أعمدة عنوان الملف/المرجع الأرشيفي"
+				reason: "لا يحتوي على أعمدة عنوان الملف/المرجع الأرشيفي في أول 15 صفاً"
 			});
 			continue;
 		}
@@ -3467,32 +3505,42 @@ async function parseLibraryExcel(file, { chapters = [] } = {}) {
 		const colMap = header.columnMap;
 		const rows = [];
 		for (let r = header.rowIndex + 1; r < aoa.length; r++) {
-			const row = aoa[r] || [];
-			const cell = (field) => colMap[field] != null ? clean(row[colMap[field]]) : "";
-			const title = cell("title");
-			const archiveRef = cell("archiveRef");
-			if (!title && !archiveRef) continue;
-			const priority = normalizePriority(cell("priority"));
-			const sectionText = cell("sectionText");
-			const { sectionId, sectionTitle } = matchSection(sectionText, chapter);
-			const url = qdlUrlForRef(archiveRef);
-			rows.push({
-				rowIndex: r + 1,
-				title,
-				archiveRef,
-				sectionText,
-				subElement: cell("subElement"),
-				priorityStars: priority.stars,
-				priorityNumeric: priority.numeric,
-				sourceType: cell("sourceType"),
-				isNew: cell("isNew"),
-				status: cell("status"),
-				importantPages: cell("importantPages"),
-				notes: cell("notes"),
-				url,
-				sectionIdMatched: sectionId,
-				sectionTitleMatched: sectionTitle
-			});
+			const row = aoa[r];
+			if (!row || row.every((v) => v == null || String(v).trim() === "")) continue;
+			scannedRowCount += 1;
+			try {
+				const cell = (field) => colMap[field] != null ? clean(row[colMap[field]]) : "";
+				const title = cell("title");
+				const archiveRef = cell("archiveRef");
+				if (!title && !archiveRef) continue;
+				const priority = normalizePriority(cell("priority"));
+				const sectionText = cell("sectionText");
+				const { sectionId, sectionTitle } = matchSection(sectionText, chapter);
+				const url = qdlUrlForRef(archiveRef);
+				rows.push({
+					rowIndex: r + 1,
+					title,
+					archiveRef,
+					sectionText,
+					subElement: cell("subElement"),
+					priorityStars: priority.stars,
+					priorityNumeric: priority.numeric,
+					sourceType: cell("sourceType"),
+					isNew: cell("isNew"),
+					status: cell("status"),
+					importantPages: cell("importantPages"),
+					notes: cell("notes"),
+					url,
+					sectionIdMatched: sectionId,
+					sectionTitleMatched: sectionTitle
+				});
+			} catch (rowErr) {
+				rowErrors.push({
+					sheetName,
+					rowIndex: r + 1,
+					reason: rowErr?.message || String(rowErr)
+				});
+			}
 		}
 		dataSheets.push({
 			sheetName,
@@ -3500,14 +3548,23 @@ async function parseLibraryExcel(file, { chapters = [] } = {}) {
 			chapterTitle,
 			rows
 		});
+	} catch (sheetErr) {
+		sheetErrors.push({
+			sheetName,
+			reason: sheetErr?.message || String(sheetErr)
+		});
 	}
 	const rowCount = dataSheets.reduce((n, s) => n + s.rows.length, 0);
 	return {
 		dataSheets,
 		skippedSheets,
+		sheetErrors,
+		rowErrors,
 		totals: {
 			dataSheetCount: dataSheets.length,
-			rowCount
+			rowCount,
+			scannedRowCount,
+			sheetCount: wb.SheetNames.length
 		}
 	};
 }
@@ -5112,6 +5169,8 @@ function App() {
 		category: "",
 		priority: ""
 	});
+	const [libSelectedIds, setLibSelectedIds] = (0, import_react.useState)(() => /* @__PURE__ */ new Set());
+	const [libBulkDeleting, setLibBulkDeleting] = (0, import_react.useState)(false);
 	const [libSelected, setLibSelected] = (0, import_react.useState)(null);
 	const [libUrlInput, setLibUrlInput] = (0, import_react.useState)("");
 	const [libUrlLoading, setLibUrlLoading] = (0, import_react.useState)(false);
@@ -5512,6 +5571,7 @@ ${JSON.stringify(thesisStructure, null, 2)}
 							author: "",
 							year: "",
 							language: "",
+							archiveRef: row.archiveRef || "",
 							sourceType: row.sourceType || "",
 							chapterId: sheet.chapterId,
 							sectionId: row.sectionIdMatched || "",
@@ -5552,14 +5612,21 @@ ${JSON.stringify(thesisStructure, null, 2)}
 				}
 			}
 			const chapterLines = Object.entries(perChapter).map(([name, c]) => `   • ${name}: مستورد ${c.imported}${c.skipped ? ` — متجاهل (مكرر) ${c.skipped}` : ""}${c.errors ? ` — أخطاء ${c.errors}` : ""}`).join("\n");
-			const skippedSheetsLine = parsed.skippedSheets.length ? `\nأوراق تم تخطيها (ليست بيانات): ${parsed.skippedSheets.map((s) => s.sheetName).join("، ")}` : "";
-			showNotif(`✅ اكتمل الاستيراد من ${file.name}\nعدد الوثائق المستوردة: ${importedCount}\nعدد التي تم تجاهلها (مكررة): ${skippedDup}\nعدد الأخطاء: ${errorCount}${chapterLines ? "\n\nتوزيع حسب الفصل:\n" + chapterLines : ""}${skippedSheetsLine}`, importedCount ? "success" : "warn");
+			const skippedSheetsLine = parsed.skippedSheets.length ? `\nأوراق تم تخطيها (ليست بيانات):\n` + parsed.skippedSheets.map((s) => `   • ${s.sheetName} — ${s.reason}`).join("\n") : "";
+			const sheetErrorsLine = (parsed.sheetErrors || []).length ? `\nأوراق فشلت أثناء المعالجة:\n` + parsed.sheetErrors.map((s) => `   • ${s.sheetName} — ${s.reason}`).join("\n") : "";
+			const rowErrorsLine = (parsed.rowErrors || []).length ? `\nصفوف فشلت (${parsed.rowErrors.length}):\n` + parsed.rowErrors.slice(0, 8).map((e) => `   • ${e.sheetName} صف ${e.rowIndex} — ${e.reason}`).join("\n") + (parsed.rowErrors.length > 8 ? `\n   • …و ${parsed.rowErrors.length - 8} أخرى (راجع Console)` : "") : "";
+			errorCount += (parsed.rowErrors || []).length;
+			const t = parsed.totals || {};
+			showNotif(`✅ اكتمل الاستيراد من ${file.name}\nتم فحص ${t.scannedRowCount ?? "?"} صف عبر ${t.dataSheetCount ?? "?"} ورقة بيانات (من أصل ${t.sheetCount ?? "?"} ورقة في الملف).\nاستيراد ناجح: ${importedCount}\nتجاهل (مكرر): ${skippedDup}\nفشل: ${errorCount}` + (chapterLines ? `\n\nتوزيع حسب الفصل:\n${chapterLines}` : "") + skippedSheetsLine + sheetErrorsLine + rowErrorsLine, importedCount ? "success" : "warn");
 			console.log("[excel-import-summary]", {
 				importedCount,
 				skippedDup,
 				errorCount,
 				perChapter,
-				skippedSheets: parsed.skippedSheets
+				totals: parsed.totals,
+				skippedSheets: parsed.skippedSheets,
+				sheetErrors: parsed.sheetErrors,
+				rowErrors: parsed.rowErrors
 			});
 		} catch (err) {
 			console.error("[handleLibExcelImport]", err);
@@ -5591,6 +5658,37 @@ ${JSON.stringify(thesisStructure, null, 2)}
 			if (error) showNotif("⚠️ فشل حذف المصدر من السحابة", "error");
 		});
 		showNotif("🗑️ تم حذف المصدر");
+	};
+	const toggleLibSelect = (id) => {
+		setLibSelectedIds((prev) => {
+			const next = new Set(prev);
+			const key = String(id);
+			if (next.has(key)) next.delete(key);
+			else next.add(key);
+			return next;
+		});
+	};
+	const clearLibSelection = () => setLibSelectedIds(/* @__PURE__ */ new Set());
+	const selectAllFilteredLib = (ids) => {
+		setLibSelectedIds(new Set(ids.map(String)));
+	};
+	const bulkDeleteSelectedLib = async () => {
+		if (libSelectedIds.size === 0) return;
+		const ids = Array.from(libSelectedIds);
+		const idSetStr = new Set(ids);
+		const targets = library.filter((s) => idSetStr.has(String(s.id)));
+		setLibBulkDeleting(true);
+		setLibrary((prev) => prev.filter((s) => !idSetStr.has(String(s.id))));
+		if (libSelected && idSetStr.has(String(libSelected.id))) setLibSelected(null);
+		for (const t of targets) if (t?.storagePath) deleteLibraryFile(t.storagePath).catch(() => {});
+		try {
+			const { error, count } = await deleteLibraryRows(ids);
+			if (error) showNotif(`⚠️ فشل حذف ${ids.length} مصدر من السحابة — أُزيلت محلياً فقط`, "error");
+			else showNotif(`🗑️ تم حذف ${count} مصدر`);
+		} finally {
+			clearLibSelection();
+			setLibBulkDeleting(false);
+		}
 	};
 	const filteredLib = library.filter((s) => {
 		const q = libFilter.query.toLowerCase();
@@ -13112,6 +13210,93 @@ ${docsContext}
 								})
 							]
 						}),
+						library.length > 0 && libSelectedIds.size > 0 && (() => {
+							const filteredIds = filteredLib.map((s) => String(s.id));
+							const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => libSelectedIds.has(id));
+							return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+								"data-testid": "lib-bulk-toolbar",
+								style: {
+									background: "#eef2ff",
+									borderRadius: 10,
+									padding: "10px 14px",
+									border: "0.5px solid #c7d2fe",
+									marginBottom: 12,
+									display: "flex",
+									gap: 10,
+									alignItems: "center",
+									flexWrap: "wrap"
+								},
+								children: [
+									/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+										"data-testid": "lib-bulk-count",
+										style: {
+											fontWeight: 700,
+											color: "#4338ca",
+											fontSize: 13
+										},
+										children: [
+											"محدد: ",
+											libSelectedIds.size,
+											" مصدر"
+										]
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { flex: 1 } }),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										"data-testid": "lib-bulk-toggle-all",
+										onClick: () => allFilteredSelected ? clearLibSelection() : selectAllFilteredLib(filteredIds),
+										style: {
+											padding: "6px 12px",
+											borderRadius: 7,
+											background: "white",
+											color: "#4338ca",
+											border: "0.5px solid #c7d2fe",
+											cursor: "pointer",
+											fontFamily: "inherit",
+											fontSize: 12,
+											fontWeight: 600
+										},
+										children: allFilteredSelected ? "إلغاء تحديد الكل" : `تحديد الكل (${filteredIds.length})`
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										"data-testid": "lib-bulk-clear",
+										onClick: clearLibSelection,
+										style: {
+											padding: "6px 12px",
+											borderRadius: 7,
+											background: "white",
+											color: "#475569",
+											border: "0.5px solid #cbd5e1",
+											cursor: "pointer",
+											fontFamily: "inherit",
+											fontSize: 12,
+											fontWeight: 600
+										},
+										children: "مسح التحديد"
+									}),
+									/* @__PURE__ */ (0, import_jsx_runtime.jsx)("button", {
+										"data-testid": "lib-bulk-delete",
+										disabled: libBulkDeleting,
+										onClick: () => setConfirmDialog({
+											title: "تأكيد الحذف الجماعي",
+											message: `هل تريد حذف ${libSelectedIds.size} مصدر؟\nلا يمكن التراجع عن هذا الإجراء.`,
+											onConfirm: () => bulkDeleteSelectedLib()
+										}),
+										style: {
+											padding: "7px 14px",
+											borderRadius: 7,
+											background: libBulkDeleting ? "#94a3b8" : "#dc2626",
+											color: "white",
+											border: "none",
+											cursor: libBulkDeleting ? "not-allowed" : "pointer",
+											fontFamily: "inherit",
+											fontSize: 12,
+											fontWeight: 700
+										},
+										children: libBulkDeleting ? "⏳ جاري الحذف..." : `🗑️ حذف المحدد (${libSelectedIds.size})`
+									})
+								]
+							});
+						})(),
 						library.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 							style: {
 								background: "white",
@@ -13169,6 +13354,22 @@ ${docsContext}
 											alignItems: "flex-start"
 										},
 										children: [
+											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", {
+												type: "checkbox",
+												"data-testid": `lib-card-checkbox-${src.id}`,
+												checked: libSelectedIds.has(String(src.id)),
+												onClick: (e) => e.stopPropagation(),
+												onChange: () => toggleLibSelect(src.id),
+												style: {
+													marginTop: 8,
+													cursor: "pointer",
+													width: 16,
+													height: 16,
+													flexShrink: 0,
+													accentColor: "#3B82F6"
+												},
+												"aria-label": "تحديد هذا المصدر"
+											}),
 											/* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", {
 												style: {
 													fontSize: 28,
@@ -13190,6 +13391,21 @@ ${docsContext}
 														},
 														children: src.title || src.fileName
 													}),
+													(src.archiveRef || extractRefFromNotes(src.notes)) && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
+														"data-testid": "lib-card-archive-ref",
+														style: {
+															fontSize: 11,
+															fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+															color: "#334155",
+															background: "#eef2ff",
+															display: "inline-block",
+															padding: "2px 8px",
+															borderRadius: 5,
+															marginBottom: 5,
+															direction: "ltr"
+														},
+														children: ["📎 ", src.archiveRef || extractRefFromNotes(src.notes)]
+													}),
 													/* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", {
 														style: {
 															display: "flex",
@@ -13203,6 +13419,7 @@ ${docsContext}
 															src.year && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["📅 ", src.year] }),
 															src.language && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("span", { children: ["🌐 ", src.language] }),
 															src.sourceType && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", {
+																"data-testid": "lib-card-source-type",
 																style: {
 																	background: "#f1f5f9",
 																	borderRadius: 4,
