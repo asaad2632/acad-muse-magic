@@ -1,0 +1,8 @@
+name = "asaad2632-acad-muse-magic"
+compatibility_date = "2026-07-09"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = "dist"
+
+[vars]
+SUPABASE_URL = "https://cbkxcbgtklmuubncaate.supabase.co"
+SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNia3hjYmd0a2xtdXVibmNhYXRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MDE5OTMsImV4cCI6MjA5ODQ3Nzk5M30.VO4-b3VcksRE00gK2lwmIM6dnstK3J0JLAcGPG7mR8g"
