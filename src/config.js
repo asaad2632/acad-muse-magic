@@ -6,6 +6,7 @@ export const AI_MODELS = [
   { id: "groq/llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B (مفتاحك الخاص)" },
   { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "OpenRouter — Llama 3.3 70B (مجاني)" },
   { id: "google/gemini-3-flash-preview", label: "Lovable Cloud — Gemini 3 Flash" },
+  { id: "gemini/gemini-2.5-flash", label: "Gemini — 2.5 Flash (مفتاحك الخاص)" },
 ];
 
 export const MODEL_STORAGE_KEY = "acadarchiv_ai_model";

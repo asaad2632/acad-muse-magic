@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
 
-type Provider = "groq" | "lovable" | "openrouter";
+type Provider = "groq" | "lovable" | "openrouter" | "gemini";
 
 function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal = false) {
   const msgs: { role: string; content: unknown }[] = [];
@@ -18,12 +18,27 @@ function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal 
   return msgs;
 }
 
+// Gemini's generateContent API has its own shape: no "system" role inside the
+// turn list (it's a separate top-level systemInstruction), and the assistant
+// role is called "model" rather than "assistant".
+function toGeminiContents(messages: ChatMsg[]) {
+  return (messages || [])
+    .filter((m) => m.role !== "system")
+    .map((m) => {
+      const role = m.role === "assistant" ? "model" : "user";
+      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return { role, parts: [{ text }] };
+    });
+}
+
 function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "lovable") return "lovable";
   if (forceProvider === "groq") return "groq";
   if (forceProvider === "openrouter") return "openrouter";
+  if (forceProvider === "gemini") return "gemini";
   if (model.startsWith("groq/")) return "groq";
   if (model.startsWith("openrouter/")) return "openrouter";
+  if (model.startsWith("gemini/")) return "gemini";
   return "lovable";
 }
 
@@ -85,6 +100,17 @@ export const Route = createFileRoute("/api/ai-chat")({
               "X-Title": "AcadArchiv",
             };
             sendModel = model.replace(/^openrouter\//, "");
+          } else if (provider === "gemini") {
+            const gemKey = (process.env.GEMINI_API_KEY || "").trim();
+            if (!gemKey) {
+              return new Response(JSON.stringify({ error: "Missing GEMINI_API_KEY" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            sendModel = model.replace(/^gemini\//, "");
+            endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${sendModel}:generateContent?key=${gemKey}`;
+            headers = { "Content-Type": "application/json" };
           } else {
             const key = process.env.LOVABLE_API_KEY;
             if (!key) {
@@ -101,11 +127,27 @@ export const Route = createFileRoute("/api/ai-chat")({
             sendModel = model;
           }
 
-          const payload = JSON.stringify({
-            model: sendModel,
-            messages: toOpenAIMessages(body.messages || [], body.system, allowMultimodal),
-            max_tokens: body.max_tokens ?? 1024,
-          });
+          const payload =
+            provider === "gemini"
+              ? JSON.stringify({
+                  ...(body.system ? { systemInstruction: { parts: [{ text: body.system }] } } : {}),
+                  contents: toGeminiContents(body.messages || []),
+                  generationConfig: {
+                    maxOutputTokens: body.max_tokens ?? 1024,
+                    thinkingConfig: { thinkingBudget: 0 },
+                  },
+                })
+              : JSON.stringify({
+                  model: sendModel,
+                  messages: toOpenAIMessages(body.messages || [], body.system, allowMultimodal),
+                  max_tokens: body.max_tokens ?? 1024,
+                });
+
+          // Tracks the shape of whatever response ends up in `resp` — starts matching
+          // the primary provider, but flips to "openai" if the Lovable fallback below
+          // ends up serving the response instead (Lovable's gateway is OpenAI-shaped
+          // even when the primary provider was Gemini).
+          let respShape: "openai" | "gemini" = provider === "gemini" ? "gemini" : "openai";
 
           let resp: Response | null = null;
           let lastErrText = "";
@@ -138,6 +180,7 @@ export const Route = createFileRoute("/api/ai-chat")({
                 headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
                 body: fbPayload,
               });
+              respShape = "openai";
             }
           }
 
@@ -150,7 +193,10 @@ export const Route = createFileRoute("/api/ai-chat")({
             });
           }
           const data = await resp.json();
-          const text = data?.choices?.[0]?.message?.content || "";
+          const text =
+            respShape === "gemini"
+              ? data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("") || ""
+              : data?.choices?.[0]?.message?.content || "";
           return new Response(JSON.stringify({ content: [{ type: "text", text }] }), {
             headers: { "Content-Type": "application/json" },
           });
