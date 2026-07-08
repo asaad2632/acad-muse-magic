@@ -8,6 +8,44 @@ import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce,
 import { supabase } from "@/integrations/supabase/client";
 import { parseLibraryExcel, buildNotesWithRef, extractRefFromNotes } from "./lib/excelImport";
 
+// يستبدل أحرف التحكم الخام (0x00-0x1F) الموجودة داخل قيم السلاسل النصية لـ JSON
+// (وليس في أي مكان آخر بالنص) بمكافئها المُهرّب — بعض النماذج (خصوصاً Groq) تُرجع
+// newline/tab حرفياً داخل قيمة نصية بين علامتي اقتباس، وهو ما يكسر JSON.parse رغم
+// أن بنية الـ JSON نفسها سليمة.
+function escapeControlCharsInJsonStrings(str) {
+  let result = "";
+  let inString = false;
+  let escapeNext = false;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (inString && escapeNext) {
+      result += ch;
+      escapeNext = false;
+      continue;
+    }
+    if (inString && ch === "\\") {
+      result += ch;
+      escapeNext = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      result += ch;
+      continue;
+    }
+    const code = str.charCodeAt(i);
+    if (inString && code <= 0x1f) {
+      if (ch === "\n") result += "\\n";
+      else if (ch === "\r") result += "\\r";
+      else if (ch === "\t") result += "\\t";
+      else result += "\\u" + code.toString(16).padStart(4, "0");
+      continue;
+    }
+    result += ch;
+  }
+  return result;
+}
+
 // يزيل أسيجة Markdown (```json / ```javascript / ``` بدون لغة) من أي مكان في
 // النص، ثم يقتصّ أي نص محيط زائد قبل أول "{" وبعد آخر "}" — بعض النماذج تُرفق
 // شرحاً قبل/بعد الـ JSON رغم تعليمات البرومبت.
@@ -19,7 +57,7 @@ function extractJsonFromLlmText(raw) {
   const first = stripped.indexOf("{");
   const last = stripped.lastIndexOf("}");
   if (first === -1 || last === -1 || last <= first) return stripped;
-  return stripped.slice(first, last + 1);
+  return escapeControlCharsInJsonStrings(stripped.slice(first, last + 1));
 }
 
 // ============================================================
