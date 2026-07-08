@@ -13,6 +13,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as ApiGeminiAnalyzeRouteImport } from './routes/api/gemini-analyze'
 import { Route as ApiAiChatRouteImport } from './routes/api/ai-chat'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
@@ -34,6 +35,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiGeminiAnalyzeRoute = ApiGeminiAnalyzeRouteImport.update({
+  id: '/api/gemini-analyze',
+  path: '/api/gemini-analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAiChatRoute = ApiAiChatRouteImport.update({
   id: '/api/ai-chat',
   path: '/api/ai-chat',
@@ -45,11 +51,13 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
   '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
@@ -58,19 +66,26 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/reset-password' | '/api/ai-chat'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/reset-password'
+    | '/api/ai-chat'
+    | '/api/gemini-analyze'
   fileRoutesByTo: FileRoutesByTo
-  to: '/auth' | '/reset-password' | '/api/ai-chat' | '/'
+  to: '/auth' | '/reset-password' | '/api/ai-chat' | '/api/gemini-analyze' | '/'
   id:
     | '__root__'
     | '/_authenticated'
     | '/auth'
     | '/reset-password'
     | '/api/ai-chat'
+    | '/api/gemini-analyze'
     | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
@@ -79,6 +94,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiAiChatRoute: typeof ApiAiChatRoute
+  ApiGeminiAnalyzeRoute: typeof ApiGeminiAnalyzeRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -111,6 +127,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/gemini-analyze': {
+      id: '/api/gemini-analyze'
+      path: '/api/gemini-analyze'
+      fullPath: '/api/gemini-analyze'
+      preLoaderRoute: typeof ApiGeminiAnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/ai-chat': {
       id: '/api/ai-chat'
       path: '/api/ai-chat'
@@ -137,6 +160,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ApiAiChatRoute: ApiAiChatRoute,
+  ApiGeminiAnalyzeRoute: ApiGeminiAnalyzeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

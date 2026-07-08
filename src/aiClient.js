@@ -45,3 +45,32 @@ export async function analyzeDocumentLLM({ prompt, fileName, mimeType, base64, t
     messages: [{ role: "user", content: userContent }],
   });
 }
+
+// Historical-analysis feature (Gemini API direct, separate from callLLM/callLLM
+// consumers) — proxied through /api/gemini-analyze, a standalone server route
+// with its own key (GEMINI_API_KEY), independent of the Groq/OpenRouter/Lovable
+// translation path.
+export async function analyzeHistoricalContext({ prompt, max_tokens = 2000 }) {
+  let resp;
+  try {
+    resp = await fetch("/api/gemini-analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, max_tokens }),
+    });
+  } catch (err) {
+    console.error("[analyzeHistoricalContext] network error", err);
+    const netErr = new Error(err?.message || "network error");
+    netErr.isNetworkError = true;
+    throw netErr;
+  }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data?.error) {
+    console.error("[analyzeHistoricalContext] API error", resp.status, data?.error);
+    const apiErr = new Error(data?.error || `HTTP ${resp.status}`);
+    apiErr.isNetworkError = false;
+    throw apiErr;
+  }
+  const text = data?.content?.[0]?.text || "";
+  return { content: [{ type: "text", text }] };
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { AI_MODELS, getSelectedModel, setSelectedModel } from "./config";
-import { callLLM, analyzeDocumentLLM } from "./aiClient";
+import { callLLM, analyzeDocumentLLM, analyzeHistoricalContext } from "./aiClient";
 import mammoth from "mammoth";
 import SupervisorRoom from "./SupervisorRoom";
 import NotificationBell from "./NotificationBell";
@@ -2283,6 +2283,9 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
   const [translatorLoading, setTranslatorLoading]     = useState(false);
   const [translatorLang, setTranslatorLang]           = useState("إنجليزية");
   const [translatorDocMeta, setTranslatorDocMeta]     = useState(null);
+  const [historicalAnalysis, setHistoricalAnalysis]         = useState(null);
+  const [historicalAnalysisLoading, setHistoricalAnalysisLoading] = useState(false);
+  const [historicalAnalysisError, setHistoricalAnalysisError]     = useState("");
   const [savedTranslations, setSavedTranslations]     = useState(() => {
     try { const v = localStorage.getItem("acadarchiv_translations"); return v && v !== "undefined" ? JSON.parse(v) : []; } catch { return []; }
   });
@@ -2447,6 +2450,8 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
     setTranslatedResult("");
     setKeyPoints([]);
     setTranslatorDocMeta(null);
+    setHistoricalAnalysis(null);
+    setHistoricalAnalysisError("");
 
     const prompt = `أنت مترجم ومؤرخ أكاديمي متخصص في وثائق الأرشيف البريطاني (مكتب الهند) والأمريكي المتعلقة بالخليج العربي في الحرب العالمية الثانية 1939-1945.
 
@@ -2507,6 +2512,58 @@ ${textToTranslate.substring(0, 4000)}
       setKeyPoints([]);
     }
     setTranslatorLoading(false);
+  };
+
+  // قسم منفصل تماماً عن الترجمة (Groq): يحلّل الوثيقة المُترجَمة عبر Gemini API
+  // مباشرة لاستخراج السياق التاريخي وأهمية الوثيقة ضمن نطاق البحث. فشل هذا
+  // القسم لا يؤثر على نتيجة الترجمة أعلاه ولا يعيد استدعاءها.
+  const runHistoricalAnalysis = async () => {
+    if (!translatedResult) return;
+    setHistoricalAnalysisLoading(true);
+    setHistoricalAnalysisError("");
+    setHistoricalAnalysis(null);
+
+    const prompt = `أنت مؤرخ أكاديمي متخصص في تاريخ الخليج العربي في سنوات الحرب العالمية الثانية 1939-1945.
+
+فيما يلي وثيقة مترجمة إلى العربية${translatorDocMeta?.docType ? ` (نوعها: ${translatorDocMeta.docType})` : ""}${translatorDocMeta?.date ? `، تاريخها: ${translatorDocMeta.date}` : ""}:
+"""
+${translatedResult.substring(0, 6000)}
+"""
+
+أجب بـ JSON فقط بدون أي نص خارجه:
+{
+  "historicalContext": "السياق التاريخي الذي صدرت فيه الوثيقة (الأحداث، الظروف السياسية/العسكرية المحيطة)",
+  "keyThemes": ["نقطة جوهرية أولى", "نقطة جوهرية ثانية", "نقطة جوهرية ثالثة"],
+  "researchSignificance": "أهمية هذه الوثيقة تحديداً ضمن نطاق البحث (الخليج العربي 1939-1945) وما تضيفه للأطروحة"
+}`;
+
+    let raw = "";
+    try {
+      const data = await analyzeHistoricalContext({ prompt, max_tokens: 2000 });
+      raw = data.content?.map(c => c.text || "").join("") || "{}";
+    } catch (err) {
+      setHistoricalAnalysisError(
+        err?.isNetworkError
+          ? "حدث خطأ في الاتصال بـ Gemini — تأكد من الاتصال بالإنترنت"
+          : `تعذّر الاتصال بخدمة التحليل التاريخي: ${err?.message || err}`
+      );
+      setHistoricalAnalysisLoading(false);
+      return;
+    }
+
+    try {
+      const clean = extractJsonFromLlmText(raw);
+      const parsed = JSON.parse(clean);
+      setHistoricalAnalysis({
+        historicalContext: parsed.historicalContext || "",
+        keyThemes: parsed.keyThemes || [],
+        researchSignificance: parsed.researchSignificance || "",
+      });
+    } catch (err) {
+      console.error("[runHistoricalAnalysis] فشل تحليل رد Gemini. الرد الخام:", raw, err);
+      setHistoricalAnalysisError("فشل تحليل رد الذكاء الاصطناعي — حاول مرة أخرى");
+    }
+    setHistoricalAnalysisLoading(false);
   };
 
   const saveTranslation = () => {
@@ -5004,7 +5061,7 @@ ${docsContext}
 
                 {/* النقاط الجوهرية */}
                 {keyPoints.length>0 && !translatorLoading && (
-                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",overflow:"hidden"}}>
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
                     <div style={{background:"#7C3AED",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div style={{fontWeight:600,fontSize:13}}>⭐ النقاط الجوهرية والأفكار المفتاحية</div>
                       <button
@@ -5029,6 +5086,65 @@ ${docsContext}
                           </div>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ===== التحليل التاريخي (Gemini) — قسم منفصل تماماً عن الترجمة أعلاه ===== */}
+                {translatedResult && !translatorLoading && !historicalAnalysisLoading && !historicalAnalysis && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",padding:16,marginBottom:14,textAlign:"center"}}>
+                    <button
+                      onClick={runHistoricalAnalysis}
+                      style={{padding:"9px 16px",borderRadius:8,background:"#92400E",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
+                      🏛️ تحليل تاريخي (Gemini)
+                    </button>
+                    {historicalAnalysisError && (
+                      <div style={{fontSize:11,color:"#dc2626",marginTop:8}}>{historicalAnalysisError}</div>
+                    )}
+                  </div>
+                )}
+
+                {historicalAnalysisLoading && (
+                  <div style={{background:"white",borderRadius:12,padding:30,border:"0.5px solid #e2e8f0",textAlign:"center",marginBottom:14}}>
+                    <div style={{fontSize:32,marginBottom:10}}>🏛️</div>
+                    <div style={{fontWeight:600,color:"#92400E",marginBottom:6}}>جاري التحليل التاريخي عبر Gemini...</div>
+                    <div style={{fontSize:12,color:"#64748b"}}>استخراج السياق التاريخي وأهمية الوثيقة ضمن نطاق البحث</div>
+                  </div>
+                )}
+
+                {historicalAnalysis && !historicalAnalysisLoading && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
+                    <div style={{background:"#92400E",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:600,fontSize:13}}>🏛️ التحليل التاريخي (Gemini)</div>
+                      <button
+                        onClick={runHistoricalAnalysis}
+                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                        🔄 إعادة التحليل
+                      </button>
+                    </div>
+                    <div style={{padding:16}}>
+                      {historicalAnalysis.historicalContext && (
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#92400E",marginBottom:5}}>السياق التاريخي</div>
+                          <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{historicalAnalysis.historicalContext}</p>
+                        </div>
+                      )}
+                      {historicalAnalysis.keyThemes?.length>0 && (
+                        <div style={{marginBottom:14}}>
+                          <div style={{fontSize:11,fontWeight:700,color:"#92400E",marginBottom:5}}>النقاط الجوهرية</div>
+                          <ul style={{margin:0,paddingInlineStart:18,display:"flex",flexDirection:"column",gap:6}}>
+                            {historicalAnalysis.keyThemes.map((t,i)=>(
+                              <li key={i} style={{fontSize:13,lineHeight:1.7,color:"#1e293b"}}>{t}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {historicalAnalysis.researchSignificance && (
+                        <div>
+                          <div style={{fontSize:11,fontWeight:700,color:"#92400E",marginBottom:5}}>أهمية الوثيقة ضمن نطاق البحث</div>
+                          <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{historicalAnalysis.researchSignificance}</p>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
