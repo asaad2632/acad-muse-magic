@@ -8,6 +8,20 @@ import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce,
 import { supabase } from "@/integrations/supabase/client";
 import { parseLibraryExcel, buildNotesWithRef, extractRefFromNotes } from "./lib/excelImport";
 
+// يزيل أسيجة Markdown (```json / ```javascript / ``` بدون لغة) من أي مكان في
+// النص، ثم يقتصّ أي نص محيط زائد قبل أول "{" وبعد آخر "}" — بعض النماذج تُرفق
+// شرحاً قبل/بعد الـ JSON رغم تعليمات البرومبت.
+function extractJsonFromLlmText(raw) {
+  const stripped = String(raw ?? "")
+    .replace(/```[a-zA-Z]*/g, "")
+    .replace(/```/g, "")
+    .trim();
+  const first = stripped.indexOf("{");
+  const last = stripped.lastIndexOf("}");
+  if (first === -1 || last === -1 || last <= first) return stripped;
+  return stripped.slice(first, last + 1);
+}
+
 // ============================================================
 // بيانات الفصول والمباحث — مستخرجة من خطة السمنار
 // الخليج العربي في سنوات الحرب العالمية الثانية 1939-1945
@@ -2425,19 +2439,33 @@ ${textToTranslate.substring(0, 4000)}
   ]
 }`;
 
+    let raw = "";
     try {
       const data = await callLLM({
-          max_tokens: 2000,
+          max_tokens: 4000,
           messages: [{ role: "user", content: prompt }]
         });
-      const raw = data.content?.map(c => c.text || "").join("") || "{}";
-      const clean = raw.replace(/```json|```/g, "").trim();
+      raw = data.content?.map(c => c.text || "").join("") || "{}";
+    } catch (err) {
+      setTranslatedResult(
+        err?.isNetworkError
+          ? "حدث خطأ في الترجمة — تأكد من الاتصال بالإنترنت"
+          : `تعذّر الاتصال بخدمة الترجمة: ${err?.message || err}`
+      );
+      setKeyPoints([]);
+      setTranslatorLoading(false);
+      return;
+    }
+
+    try {
+      const clean = extractJsonFromLlmText(raw);
       const parsed = JSON.parse(clean);
       setTranslatedResult(parsed.translation || "لم يتم الحصول على الترجمة");
       setKeyPoints(parsed.keyPoints || []);
       setTranslatorDocMeta(parsed.docMeta || null);
-    } catch {
-      setTranslatedResult("حدث خطأ في الترجمة — تأكد من الاتصال بالإنترنت");
+    } catch (err) {
+      console.error("[runTranslation] فشل تحليل رد الذكاء الاصطناعي. الرد الخام:", raw, err);
+      setTranslatedResult("فشل تحليل رد الذكاء الاصطناعي — حاول مرة أخرى أو قصّر النص");
       setKeyPoints([]);
     }
     setTranslatorLoading(false);

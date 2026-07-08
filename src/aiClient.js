@@ -4,22 +4,30 @@ import { getSelectedModel } from "./config";
 // Returns Anthropic-shaped: { content: [{ type: "text", text: "..." }] }
 export async function callLLM({ system, messages = [], max_tokens = 1024, forceProvider } = {}) {
   const model = getSelectedModel();
+  let resp;
   try {
-    const resp = await fetch("/api/ai-chat", {
+    resp = await fetch("/api/ai-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ system, messages, max_tokens, model, forceProvider }),
     });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.error) {
-      throw new Error(data?.error || `HTTP ${resp.status}`);
-    }
-    const text = data?.content?.[0]?.text || "";
-    return { content: [{ type: "text", text }] };
   } catch (err) {
-    console.error("[callLLM]", model, err);
-    return { content: [{ type: "text", text: `حدث خطأ في الاتصال بالذكاء الاصطناعي: ${err.message || err}` }] };
+    // fetch() itself only throws for genuine network failures (offline, DNS,
+    // connection refused, CORS) — never for HTTP error statuses.
+    console.error("[callLLM] network error", model, err);
+    const netErr = new Error(err?.message || "network error");
+    netErr.isNetworkError = true;
+    throw netErr;
   }
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok || data?.error) {
+    console.error("[callLLM] API error", model, resp.status, data?.error);
+    const apiErr = new Error(data?.error || `HTTP ${resp.status}`);
+    apiErr.isNetworkError = false;
+    throw apiErr;
+  }
+  const text = data?.content?.[0]?.text || "";
+  return { content: [{ type: "text", text }] };
 }
 
 // Analyze a document. Text-based files (md/txt/docx/pdf) are sent as extracted
