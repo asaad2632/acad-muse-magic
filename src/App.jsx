@@ -976,6 +976,8 @@ export default function App() {
   const [libSelected, setLibSelected] = useState(null);
   const [libUrlInput, setLibUrlInput] = useState("");
   const [libUrlLoading, setLibUrlLoading] = useState(false);
+  const [libFileArchiveRefInput, setLibFileArchiveRefInput] = useState("");
+  const [libUrlArchiveRefInput, setLibUrlArchiveRefInput] = useState("");
   const [libExcelLoading, setLibExcelLoading] = useState(false);
   const libFileRef = useRef(null);
   const libExcelRef = useRef(null);
@@ -1195,7 +1197,7 @@ ${JSON.stringify(thesisStructure, null, 2)}
   };
 
 
-  const handleLibFileUpload = async (files) => {
+  const handleLibFileUpload = async (files, archiveRefOverride = "") => {
     if (!files?.length) return;
     const fileArr = Array.from(files);
     if (fileArr.length > MAX_LIB_FILES_BATCH) {
@@ -1207,6 +1209,10 @@ ${JSON.stringify(thesisStructure, null, 2)}
       showNotif(`⚠️ الحجم الإجمالي يتجاوز 1 غيغابايت — قلل عدد الملفات`, "error");
       return;
     }
+    // A single archival-reference number only makes sense when uploading one
+    // file — applying it to a multi-file batch would tag every file with the
+    // same (wrong) reference.
+    const singleFileRef = fileArr.length === 1 ? (archiveRefOverride || "").trim() : "";
     setLibUploading(true);
     const IMG_EXT = ["jpg","jpeg","png","webp","gif","tif","tiff","bmp","heic"];
     for (const file of fileArr) {
@@ -1276,6 +1282,7 @@ ${JSON.stringify(thesisStructure, null, 2)}
         keyPoints: [],
         storagePath,
         fileData: storedText, // text only; binary content lives in Storage
+        archiveRef: singleFileRef,
       };
       updateLibrary(prev => [newSrc, ...prev]);
       // Persist to Supabase immediately so the row appears in library_sources
@@ -1327,7 +1334,8 @@ ${JSON.stringify(thesisStructure, null, 2)}
       const newSrc = {
         id: Date.now(), fileName: libUrlInput, fileType: "url",
         uploadDate: new Date().toLocaleDateString("ar-IQ"),
-        status: "تم التحليل ✅", analyzed: true, ...parsed
+        status: "تم التحليل ✅", analyzed: true, ...parsed,
+        archiveRef: libUrlArchiveRefInput.trim() || parsed.archiveRef || "",
       };
       setLibrary(prev => [newSrc, ...prev]);
       const { error: insErr, errorType: insErrType } = await insertLibraryRow(newSrc);
@@ -1337,6 +1345,7 @@ ${JSON.stringify(thesisStructure, null, 2)}
         showNotif("⚠️ فشل حفظ الرابط في السحابة — محفوظ محلياً وسيُعاد المحاولة", "warn");
       }
       setLibUrlInput("");
+      setLibUrlArchiveRefInput("");
       showNotif("✅ تمت إضافة المصدر من الرابط");
     } catch {
       showNotif("⚠️ تعذّر استخراج البيانات — حاول مرة أخرى", "error");
@@ -4291,7 +4300,7 @@ ${docsContext}
                 <p style={{color:"#64748b",fontSize:12}}>ارفع مصادرك (PDF، MD، TXT) أو أضف رابطاً — سيحللها الذكاء الاصطناعي ويصنفها لفصول أطروحتك تلقائياً</p>
               </div>
               <div style={{display:"flex",gap:8}}>
-                <input ref={libFileRef} type="file" accept=".pdf,.docx,.md,.txt,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp,.gif,image/*" multiple style={{display:"none"}} onChange={e=>handleLibFileUpload(e.target.files)}/>
+                <input ref={libFileRef} type="file" accept=".pdf,.docx,.md,.txt,.jpg,.jpeg,.png,.webp,.tif,.tiff,.bmp,.gif,image/*" multiple style={{display:"none"}} onChange={e=>{handleLibFileUpload(e.target.files, libFileArchiveRefInput);setLibFileArchiveRefInput("");}}/>
                 <button onClick={()=>libFileRef.current?.click()} disabled={libUploading} style={{padding:"9px 18px",borderRadius:8,background:"#3B82F6",color:"white",border:"none",cursor:"pointer",fontWeight:600,fontFamily:"inherit",fontSize:13}}>
                   {libUploading?"⏳ جاري الرفع...":"📁 رفع ملفات"}
                 </button>
@@ -4313,7 +4322,15 @@ ${docsContext}
             )}
 
             {/* شريط الرفع السريع */}
-            <div style={{background:"white",borderRadius:12,padding:16,border:"2px dashed #bfdbfe",marginBottom:14,textAlign:"center",cursor:"pointer"}} onClick={()=>libFileRef.current?.click()} onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#3B82F6"}} onDragLeave={e=>e.currentTarget.style.borderColor="#bfdbfe"} onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#bfdbfe";handleLibFileUpload(e.dataTransfer.files);}}>
+            <div style={{background:"white",borderRadius:12,padding:16,border:"2px dashed #bfdbfe",marginBottom:14,textAlign:"center",cursor:"pointer"}} onClick={()=>libFileRef.current?.click()} onDragOver={e=>{e.preventDefault();e.currentTarget.style.borderColor="#3B82F6"}} onDragLeave={e=>e.currentTarget.style.borderColor="#bfdbfe"} onDrop={e=>{e.preventDefault();e.currentTarget.style.borderColor="#bfdbfe";handleLibFileUpload(e.dataTransfer.files, libFileArchiveRefInput);setLibFileArchiveRefInput("");}}>
+              <input
+                value={libFileArchiveRefInput}
+                onChange={e=>setLibFileArchiveRefInput(e.target.value)}
+                onClick={e=>e.stopPropagation()}
+                placeholder="رقم الوثيقة الأرشيفي (اختياري — لملف واحد فقط) — مثال: IOR/R/15/2/656"
+                dir="ltr"
+                style={{width:"100%",padding:"7px 10px",borderRadius:7,border:"0.5px solid #cbd5e1",fontSize:12,fontFamily:"ui-monospace, Menlo, Consolas, monospace",marginBottom:10,boxSizing:"border-box",textAlign:"left",cursor:"text"}}
+              />
               <div style={{fontSize:36,marginBottom:6}}>📂</div>
               <div style={{fontWeight:600,color:"#3B82F6",marginBottom:4}}>اسحب وأسقط ملفاتك هنا أو اضغط للاختيار</div>
               <div style={{fontSize:11,color:"#94a3b8"}}>يدعم: PDF (مع OCR) • DOCX • MD • TXT • صور ممسوحة (JPG/PNG/TIFF/WebP…) — يمر الكل بنفس الخط: رفع ← OCR ← تحليل ← تصنيف ← ربط بالأطروحة — حجم أقصى 500MB للملف الواحد • حتى 20 ملف دفعة واحدة</div>
@@ -4325,6 +4342,7 @@ ${docsContext}
               <div style={{fontWeight:600,fontSize:12,marginBottom:8,color:"#475569"}}>🔗 إضافة مصدر من رابط إنترنت</div>
               <div style={{display:"flex",gap:8}}>
                 <input value={libUrlInput} onChange={e=>setLibUrlInput(e.target.value)} placeholder="https://www.qdl.qa/... أو jstor.org أو archive.org أو أي رابط" style={{flex:1,padding:"8px 12px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:12,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter")handleLibUrlImport();}}/>
+                <input value={libUrlArchiveRefInput} onChange={e=>setLibUrlArchiveRefInput(e.target.value)} placeholder="رقم الوثيقة الأرشيفي (اختياري)" dir="ltr" style={{width:150,padding:"8px 10px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:12,fontFamily:"ui-monospace, Menlo, Consolas, monospace",boxSizing:"border-box",textAlign:"left"}}/>
                 <button onClick={handleLibUrlImport} disabled={libUrlLoading} style={{padding:"8px 16px",borderRadius:8,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12,whiteSpace:"nowrap"}}>
                   {libUrlLoading?"⏳ جاري...":"إضافة + تحليل"}
                 </button>
