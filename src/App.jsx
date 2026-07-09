@@ -3657,7 +3657,7 @@ ${docsContext}
             {/* ===== بطاقات الإحصاء السريع ===== */}
             <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:16}}>
               {[
-                {label:"إجمالي الوثائق",      v:stats.total,     c:"#3B82F6", i:"📄"},
+                {label:"إجمالي المصادر",      v:stats.total,     c:"#3B82F6", i:"📄"},
                 {label:"عالية الأولوية ★★★", v:stats.highP,     c:"#10B981", i:"⭐"},
                 {label:"هوامش مُستخرجة",     v:bibliography.length, c:"#8B5CF6", i:"📝"},
                 {label:"بطاقات بحثية",        v:cards.length,    c:"#F59E0B", i:"🗃️"},
@@ -3712,7 +3712,7 @@ ${docsContext}
               {/* ===== قسم أيمن: آخر الوثائق ===== */}
               <div style={{display:"grid",gap:14}}>
                 <div style={{background:"white",borderRadius:12,padding:14,border:"0.5px solid #e2e8f0"}}>
-                  <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>🕐 آخر الوثائق المضافة</div>
+                  <div style={{fontWeight:600,fontSize:13,marginBottom:10}}>🕐 آخر المصادر المضافة</div>
                   {docs.slice(0,5).map(d=>(
                     <div key={d.id} onClick={()=>{setSelectedDoc(d);setPage("detail");}} style={{padding:"6px 0",borderBottom:"0.5px solid #f1f5f9",cursor:"pointer",display:"flex",gap:8,alignItems:"center"}}>
                       <span style={{fontSize:10,background:pBg(d.priority),color:pColor(d.priority),borderRadius:4,padding:"1px 5px",flexShrink:0}}>{d.priority}</span>
