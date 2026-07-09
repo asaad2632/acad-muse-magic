@@ -1615,7 +1615,7 @@ ${JSON.stringify(thesisStructure, null, 2)}
   // ===== Unified source list: merges archival docs + My Library items =====
   // Library items are mapped to a doc-shaped record so they appear automatically
   // in Thesis Structure, Home Dashboard counts, Export page, and AI Assistant.
-  const libAsDocs = (library || []).map(s => {
+  const mapLibToDoc = (s) => {
     // Prefer the most specific placement: sub-section > section > legacy sections[0]
     const secId = s.subSectionId || s.sectionId || (Array.isArray(s.sections) && s.sections[0]) || "";
     return {
@@ -1638,16 +1638,18 @@ ${JSON.stringify(thesisStructure, null, 2)}
       year: s.year || "",
       fromLibrary: true,
     };
-  });
+  };
+  const libAsDocs = (library || []).map(mapLibToDoc);
   const combinedDocs = [...docs, ...libAsDocs];
 
-  // "الوثائق" tab only surfaces library items typed as archival documents —
-  // other library types (books, studies, ...) stay confined to "مكتبتي" /
-  // "هيكل الأطروحة" via combinedDocs above.
-  const DOCUMENT_LIBRARY_TYPE = "وثيقة أرشيفية";
+  // "الوثائق" tab only surfaces library items that carry a real archival
+  // reference number — filtered on the raw `archiveRef` from `library`
+  // (before mapLibToDoc's fileName fallback kicks in), otherwise every
+  // uploaded item would look like it "has" a reference. Other library items
+  // stay confined to "مكتبتي" / "هيكل الأطروحة" via combinedDocs above.
   const searchableDocs = [
     ...docs,
-    ...libAsDocs.filter(d => (d.sourceType || d.category) === DOCUMENT_LIBRARY_TYPE),
+    ...(library || []).filter(s => (s.archiveRef || "").trim() !== "").map(mapLibToDoc),
   ];
 
   const filtered = searchableDocs.filter(d => {
