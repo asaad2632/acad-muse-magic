@@ -4232,13 +4232,13 @@ ${docsContext}
             <p style={{color:"#64748b",fontSize:13,marginBottom:16}}>اسأل أي سؤال بحثي حول أطروحتك ومصادرها — يعمل بـ {AI_MODELS.find(m=>m.id===aiModel)?.label || aiModel} <span style={{display:"inline-block",width:8,height:8,borderRadius:"50%",background:"#10b981",marginInlineStart:6,verticalAlign:"middle"}} title="متصل"></span></p>
             <div style={{background:"white",borderRadius:12,padding:16,border:"0.5px solid #e2e8f0",marginBottom:14}}>
               <div style={{display:"flex",gap:10,marginBottom:10}}>
-                <input ref={aiInputRef} placeholder="مثال: ما هي أبرز وثائق RAF في البحرين؟ أو: حلّل وثائق الفصل الرابع المتعلقة بالنفط" style={{flex:1,padding:"9px 14px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:13,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter"&&aiInputRef.current)handleAISearch(aiInputRef.current.value);}}/>
+                <input ref={aiInputRef} placeholder="مثال: ما أبرز المصادر (كتب، وثائق، دراسات) عن دور القواعد الجوية في البحرين؟ أو: حلّل مصادر الفصل الرابع المتعلقة بالنفط" style={{flex:1,padding:"9px 14px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:13,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter"&&aiInputRef.current)handleAISearch(aiInputRef.current.value);}}/>
                 <button onClick={()=>aiInputRef.current&&handleAISearch(aiInputRef.current.value)} disabled={aiLoading} style={{padding:"9px 18px",borderRadius:8,background:"#7C3AED",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13}}>
                   {aiLoading?"⏳":"تحليل →"}
                 </button>
               </div>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                {["وثائق RAF وسلاح الجو في البحرين","النفط ودوره الاستراتيجي في الحرب","البروباغندا البريطانية في الخليج","فجوات بحثية في مصادر الأطروحة","أفضل وثائق الفصل الثالث"].map(q=>(
+                {["أهم الكتب والدراسات عن النفط كمورد استراتيجي","وثائق RAF وسلاح الجو في البحرين","المقالات والدوريات عن البروباغندا البريطانية في الخليج","فجوات بحثية في مصادر الأطروحة","أفضل مصادر الفصل الثالث بمختلف أنواعها"].map(q=>(
                   <button key={q} onClick={()=>{if(aiInputRef.current)aiInputRef.current.value=q;handleAISearch(q);}} style={{padding:"4px 10px",borderRadius:20,border:"0.5px solid #d8b4fe",background:"#faf5ff",color:"#7C3AED",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>{q}</button>
                 ))}
               </div>
