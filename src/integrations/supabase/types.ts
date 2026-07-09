@@ -221,6 +221,7 @@ export type Database = {
       library_sources: {
         Row: {
           analyzed: boolean | null
+          archive_ref: string | null
           author: string | null
           chapter_id: number | null
           client_id: string | null
@@ -251,6 +252,7 @@ export type Database = {
         }
         Insert: {
           analyzed?: boolean | null
+          archive_ref?: string | null
           author?: string | null
           chapter_id?: number | null
           client_id?: string | null
@@ -281,6 +283,7 @@ export type Database = {
         }
         Update: {
           analyzed?: boolean | null
+          archive_ref?: string | null
           author?: string | null
           chapter_id?: number | null
           client_id?: string | null
