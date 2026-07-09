@@ -1811,8 +1811,8 @@ ${structureHint}
       university: it.university || "",
       archiveRef: it.archiveRef || "",
       url: it.url || "",
-      sourceType: it.sourceType || "وثيقة أرشيفية",
-      category:   it.sourceType || "وثيقة أرشيفية",
+      sourceType: it.sourceType || detectSourceTypeFromUrl(it.url || urlImport),
+      category:   it.sourceType || detectSourceTypeFromUrl(it.url || urlImport),
       chapterId: it.chapterId ? parseInt(it.chapterId) : null,
       section: "",
       sectionId: "",
@@ -1832,7 +1832,7 @@ ${structureHint}
   const confirmUrlPreview = () => {
     if (!urlPreview) return;
     const parsed = urlPreview.raw || {};
-    const detectedType = urlPreview.sourceType || parsed.sourceType || "وثيقة أرشيفية";
+    const detectedType = urlPreview.sourceType || parsed.sourceType || detectSourceTypeFromUrl(parsed.url || urlImport);
     setAddForm(prev => ({
       ...prev,
       ...parsed,
@@ -3938,13 +3938,13 @@ ${docsContext}
         {/* ===== URL IMPORT ===== */}
         {page==="url_import" && (
           <div>
-            <h1 style={{fontSize:20,fontWeight:700,marginBottom:6}}>🔗 استيراد وثيقة من رابط</h1>
-            <p style={{color:"#64748b",fontSize:13,marginBottom:20}}>الصق رابط أي وثيقة من QDL أو الأرشيف البريطاني أو أي موقع أرشيفي وسيستخرج الذكاء الاصطناعي بياناتها تلقائياً</p>
+            <h1 style={{fontSize:20,fontWeight:700,marginBottom:6}}>🔗 استيراد مصدر من رابط</h1>
+            <p style={{color:"#64748b",fontSize:13,marginBottom:20}}>الصق رابط أي مصدر — وثيقة أرشيفية، كتاب، دراسة، مقالة، أو غيرها — من QDL، الأرشيف البريطاني، Jstor، Google Scholar، Internet Archive، أو أي موقع أكاديمي، وسيتعرّف الذكاء الاصطناعي على نوعه ويستخرج بياناته تلقائياً</p>
             <div style={{background:"white",borderRadius:12,padding:20,border:"0.5px solid #e2e8f0",marginBottom:16}}>
               <div style={{marginBottom:14}}>
-                <label style={{fontSize:13,fontWeight:500,display:"block",marginBottom:6}}>رابط الوثيقة</label>
+                <label style={{fontSize:13,fontWeight:500,display:"block",marginBottom:6}}>رابط المصدر</label>
                 <div style={{display:"flex",gap:10}}>
-                  <input value={urlImport} onChange={e=>setUrlImport(e.target.value)} placeholder="https://www.qdl.qa/en/archive/..." style={{flex:1,padding:"10px 14px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:13,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter")handleUrlImport();}}/>
+                  <input value={urlImport} onChange={e=>setUrlImport(e.target.value)} placeholder="https://www.qdl.qa/... أو jstor.org أو scholar.google.com أو أي رابط" style={{flex:1,padding:"10px 14px",borderRadius:8,border:"0.5px solid #cbd5e1",fontSize:13,fontFamily:"inherit"}} onKeyDown={e=>{if(e.key==="Enter")handleUrlImport();}}/>
                   <button onClick={handleUrlImport} disabled={urlLoading} style={{padding:"10px 20px",borderRadius:8,background:"#3B82F6",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:500,fontSize:13,whiteSpace:"nowrap"}}>
                     {urlLoading?"⏳ جاري...":"استخراج البيانات"}
                   </button>
@@ -3970,7 +3970,7 @@ ${docsContext}
               <div style={{background:"#f0fdf4",borderRadius:12,padding:16,border:"0.5px solid #86efac"}}>
                 <div style={{fontWeight:600,color:"#16a34a",marginBottom:10,fontSize:13}}>✅ تم استخراج البيانات — ستُضاف للنموذج تلقائياً</div>
                 <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:12,background:"white",borderRadius:8,padding:12,border:"0.5px solid #e2e8f0"}}>{JSON.stringify(urlResult,null,2)}</pre>
-                <button onClick={()=>setPage("add")} style={{marginTop:10,padding:"8px 18px",borderRadius:8,background:"#16a34a",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13}}>إكمال البيانات وإضافة الوثيقة ←</button>
+                <button onClick={()=>setPage("add")} style={{marginTop:10,padding:"8px 18px",borderRadius:8,background:"#16a34a",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:13}}>إكمال البيانات وإضافة المصدر ←</button>
               </div>
             )}
           </div>
