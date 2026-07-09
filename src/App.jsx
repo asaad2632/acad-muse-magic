@@ -1712,16 +1712,13 @@ ${JSON.stringify(thesisStructure, null, 2)}
     setUrlLoading(true);
     setUrlResult(null);
     try {
-      const structureHint = chapters.map(ch => `- [${ch.id}] ${ch.titleAr}`).join("\n");
       const data = await callLLM({
           max_tokens:3500,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
           messages:[{
             role:"user",
-            content:`اقرأ محتوى الصفحة على الرابط التالي واستخرج **جميع** المصادر/المراجع المذكورة فيها (قائمة كتب، ببليوغرافيا، نتائج بحث، فهرس وثائق… استهدف 10-20 عنصراً إن وُجدت). لا تختر مصدراً واحداً فقط.
+            content:`اقرأ محتوى الصفحة الفعلي على الرابط التالي عبر أداة البحث المتاحة لك، واستخرج منه **فقط** المصادر/المراجع الحقيقية المذكورة فيه فعلياً. إن كان الرابط يشير لمصدر واحد (مقالة إخبارية، خبر، وثيقة واحدة)، استخرج هذا المصدر الواحد فقط ولا تُضِف مصادر أخرى. إن كان الرابط صفحة ببليوغرافيا أو نتائج بحث تحوي عدة مصادر حقيقية، استخرجها جميعاً (حتى 20 عنصراً).
 الرابط: ${urlImport}
-
-هيكل الأطروحة (للترشيح):
-${structureHint}
 
 أعد JSON خالصاً فقط بدون أي شرح وبدون \`\`\`:
 {
@@ -1741,14 +1738,13 @@ ${structureHint}
       "archiveRef": "رقم الأرشيف إن وُجد",
       "url": "رابط الوصول إن وُجد",
       "sourceType": "أحد: كتاب عربي|كتاب أجنبي|رسالة ماجستير|أطروحة دكتوراه|بحث علمي|مجلة علمية|مؤتمر علمي|صحيفة|موقع إلكتروني|موسوعة|وثيقة أرشيفية|تقرير رسمي|مصدر أولي",
-      "suggestedChapterId": رقم_الفصل_المقترح_أو_null,
       "relevance": "سطر واحد عن صلته بأطروحة الخليج العربي 1939-1945",
       "footnoteSummary": "ملخص مقترح للحاشية (سطران)"
     }
   ]
 }
 
-إن وجدت مصدراً واحداً فقط فأعده داخل المصفوفة. اعتمد على بيانات الصفحة فعلياً ولا تختلق مصادر.`
+اعتمد فقط على المحتوى الفعلي الذي قرأته من الرابط عبر أداة البحث. إن تعذّر الوصول للرابط أو قراءة محتواه، أو لم تجد فيه أي مصدر حقيقي، أعد {"sources":[]} فارغة — لا تختلق أي عنوان أو مصدر تحت أي ظرف.`
           }]
         });
       const text = data.content?.map(c=>c.text||"").join("") || "";
@@ -1766,7 +1762,7 @@ ${structureHint}
         _idx: i,
         sourceType: s.sourceType || detectSourceTypeFromUrl(s.url || urlImport),
         url: s.url || urlImport,
-        chapterId: s.suggestedChapterId || "",
+        chapterId: "",
         keep: true,
       }));
       if (items.length === 1) {
@@ -3128,7 +3124,7 @@ ${docsContext}
                         {["كتاب عربي","كتاب أجنبي","رسالة ماجستير","أطروحة دكتوراه","بحث علمي","مجلة علمية","مؤتمر علمي","صحيفة","موقع إلكتروني","موسوعة","وثيقة أرشيفية","تقرير رسمي","مصدر أولي"].map(t=><option key={t} value={t}>{t}</option>)}
                       </select>
                       <select value={it.chapterId||""} onChange={e=>upd("chapterId",e.target.value)} style={{padding:"5px 8px",borderRadius:6,border:"0.5px solid #cbd5e1",fontSize:11,fontFamily:"inherit",flex:1}}>
-                        <option value="">— اختر الفصل المقترح —</option>
+                        <option value="">— اختر الفصل —</option>
                         {chapters.map(ch=><option key={ch.id} value={ch.id}>{ch.titleAr.split(":")[0]}</option>)}
                       </select>
                     </div>
