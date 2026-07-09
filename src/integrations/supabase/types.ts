@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      allowed_users: {
+        Row: {
+          created_at: string
+          email: string | null
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          role: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          role?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       bibliography: {
         Row: {
           added_at: string | null
@@ -287,6 +308,24 @@ export type Database = {
           user_id?: string | null
           why_important?: string | null
           year?: string | null
+        }
+        Relationships: []
+      }
+      notification_reads: {
+        Row: {
+          last_read_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          last_read_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          last_read_at?: string
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
@@ -718,7 +757,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      is_allowed: { Args: never; Returns: boolean }
     }
     Enums: {
       [_ in never]: never
