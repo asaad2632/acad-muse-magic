@@ -1615,35 +1615,42 @@ ${JSON.stringify(thesisStructure, null, 2)}
   // ===== Unified source list: merges archival docs + My Library items =====
   // Library items are mapped to a doc-shaped record so they appear automatically
   // in Thesis Structure, Home Dashboard counts, Export page, and AI Assistant.
-  const combinedDocs = (() => {
-    const libAsDocs = (library || []).map(s => {
-      // Prefer the most specific placement: sub-section > section > legacy sections[0]
-      const secId = s.subSectionId || s.sectionId || (Array.isArray(s.sections) && s.sections[0]) || "";
-      return {
-        id: typeof s.id === "string" && s.id.startsWith("lib-") ? s.id : `lib-${s.id}`,
-        title: s.title || s.fileName || "مصدر من المكتبة",
-        archiveRef: s.archiveRef || s.fileName || "",
-        chapterId: typeof s.chapterId === "string" ? parseInt(s.chapterId) : s.chapterId,
-        sectionId: secId,
-        section: s.section || (Array.isArray(s.sections) ? s.sections.join("، ") : ""),
-        priority: s.priority || "★★",
-        // Preserve the source's real type. Also expose it under `sourceType`
-        // so the structure page can pick it up directly (falls back to
-        // legacy `category` for base docs).
-        sourceType: s.sourceType || s.category || "",
-        category: s.sourceType || s.category || "",
-        isNew: true,
-        status: s.status || (s.analyzed ? "تم التحليل ✅" : "لم يُراجع"),
-        notes: s.summary || s.whyImportant || "",
-        author: s.author || "",
-        year: s.year || "",
-        fromLibrary: true,
-      };
-    });
-    return [...docs, ...libAsDocs];
-  })();
+  const libAsDocs = (library || []).map(s => {
+    // Prefer the most specific placement: sub-section > section > legacy sections[0]
+    const secId = s.subSectionId || s.sectionId || (Array.isArray(s.sections) && s.sections[0]) || "";
+    return {
+      id: typeof s.id === "string" && s.id.startsWith("lib-") ? s.id : `lib-${s.id}`,
+      title: s.title || s.fileName || "مصدر من المكتبة",
+      archiveRef: s.archiveRef || s.fileName || "",
+      chapterId: typeof s.chapterId === "string" ? parseInt(s.chapterId) : s.chapterId,
+      sectionId: secId,
+      section: s.section || (Array.isArray(s.sections) ? s.sections.join("، ") : ""),
+      priority: s.priority || "★★",
+      // Preserve the source's real type. Also expose it under `sourceType`
+      // so the structure page can pick it up directly (falls back to
+      // legacy `category` for base docs).
+      sourceType: s.sourceType || s.category || "",
+      category: s.sourceType || s.category || "",
+      isNew: true,
+      status: s.status || (s.analyzed ? "تم التحليل ✅" : "لم يُراجع"),
+      notes: s.summary || s.whyImportant || "",
+      author: s.author || "",
+      year: s.year || "",
+      fromLibrary: true,
+    };
+  });
+  const combinedDocs = [...docs, ...libAsDocs];
 
-  const filtered = docs.filter(d => {
+  // "الوثائق" tab only surfaces library items typed as archival documents —
+  // other library types (books, studies, ...) stay confined to "مكتبتي" /
+  // "هيكل الأطروحة" via combinedDocs above.
+  const DOCUMENT_LIBRARY_TYPE = "وثيقة أرشيفية";
+  const searchableDocs = [
+    ...docs,
+    ...libAsDocs.filter(d => (d.sourceType || d.category) === DOCUMENT_LIBRARY_TYPE),
+  ];
+
+  const filtered = searchableDocs.filter(d => {
     const q = searchFilters.query.toLowerCase();
     if (q && !d.title.toLowerCase().includes(q) && !(d.archiveRef||"").toLowerCase().includes(q) && !(d.notes||"").toLowerCase().includes(q) && !(d.section||"").toLowerCase().includes(q)) return false;
     if (searchFilters.chapterId && d.chapterId !== parseInt(searchFilters.chapterId)) return false;
