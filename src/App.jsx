@@ -2567,19 +2567,26 @@ ${textToAnalyze.substring(0, 4000)}
     setHistoricalAnalysisLoading(false);
   };
 
-  const saveTranslation = () => {
-    if (!translatedResult) { showNotif("لا يوجد محتوى للحفظ", "error"); return; }
+  const saveTranslation = (source = "groq") => {
+    const isGemini = source === "gemini";
+    const content = isGemini ? historicalAnalysis?.translation : translatedResult;
+    if (!content) { showNotif("لا يوجد محتوى للحفظ", "error"); return; }
     const entry = {
       id:           Date.now() + Math.random(),
       fileName:     translatorFileName || "نص ملصوق",
       originalText: translatorText.substring(0, 500),
-      translation:  translatedResult,
-      keyPoints,
-      docMeta:      translatorDocMeta,
+      translation:  content,
+      keyPoints:    isGemini
+        ? (historicalAnalysis.keyThemes || []).map((t, i) => ({ rank: i + 1, point: t, chapter: "", importance: "" }))
+        : keyPoints,
+      docMeta:      isGemini
+        ? { historicalContext: historicalAnalysis.historicalContext || "", researchSignificance: historicalAnalysis.researchSignificance || "" }
+        : translatorDocMeta,
       savedAt:      new Date().toLocaleDateString("ar-IQ"),
+      source,
     };
     saveTranslations([entry, ...savedTranslations]);
-    showNotif("✅ تم حفظ الترجمة في السجل");
+    showNotif(isGemini ? "✅ تم حفظ تحليل Gemini في السجل" : "✅ تم حفظ الترجمة في السجل");
   };
 
   const deleteTranslation = (id) => {
@@ -5013,6 +5020,8 @@ ${docsContext}
                         {label:"التاريخ",           value:translatorDocMeta.date},
                         {label:"نوع الوثيقة",       value:translatorDocMeta.docType},
                         {label:"الفصل المقترح",     value:translatorDocMeta.suggestedChapter},
+                        {label:"السياق التاريخي",   value:translatorDocMeta.historicalContext},
+                        {label:"أهمية البحث",       value:translatorDocMeta.researchSignificance},
                       ].map(f=>f.value&&(
                         <div key={f.label} style={{display:"flex",gap:6}}>
                           <span style={{fontSize:10,color:"#94a3b8",minWidth:100,flexShrink:0}}>{f.label}</span>
@@ -5022,7 +5031,7 @@ ${docsContext}
                     </div>
                     <div style={{display:"flex",gap:8,marginTop:12}}>
                       <button
-                        onClick={saveTranslation}
+                        onClick={()=>saveTranslation()}
                         style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
                         💾 حفظ في سجل الترجمات
                       </button>
@@ -5118,11 +5127,18 @@ ${docsContext}
                   <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
                     <div style={{background:"#92400E",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <div style={{fontWeight:600,fontSize:13}}>🏛️ ترجمة وتحليل تاريخي (Gemini)</div>
-                      <button
-                        onClick={runHistoricalAnalysis}
-                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
-                        🔄 إعادة التحليل
-                      </button>
+                      <div style={{display:"flex",gap:6}}>
+                        <button
+                          onClick={()=>saveTranslation("gemini")}
+                          style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                          💾 حفظ
+                        </button>
+                        <button
+                          onClick={runHistoricalAnalysis}
+                          style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                          🔄 إعادة التحليل
+                        </button>
+                      </div>
                     </div>
                     <div style={{padding:16}}>
                       {historicalAnalysis.translation && (
@@ -5194,6 +5210,7 @@ ${docsContext}
                         {tr.docMeta?.docType && <span>📄 {tr.docMeta.docType}</span>}
                         <span>💾 {tr.savedAt}</span>
                         <span>⭐ {tr.keyPoints?.length||0} نقطة جوهرية</span>
+                        <span>{tr.source==="gemini" ? "🏛️ Gemini" : "🌐 Groq"}</span>
                       </div>
                       {tr.originalText && (
                         <div style={{fontSize:10,color:"#94a3b8",marginTop:3,fontFamily:"monospace",direction:"ltr",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
