@@ -1,12 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { supabase } from "../../integrations/supabase/client";
 
 // Server-side proxy in front of src/spacesStorage.js (DigitalOcean Spaces).
 // The Spaces secret key must never reach the browser, so all reads/writes of
 // thesis-files-style uploads go through this route instead of calling
-// spacesStorage.js directly from client code. Mirrors the auth check used by
-// src/integrations/supabase/auth-middleware.ts, but as a plain function here
-// since this is a file-route handler, not a server function.
+// spacesStorage.js directly from client code. Auth is the same session
+// cookie as every other /api route (see src/session.server.ts).
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // matches MAX_LIB_FILE_SIZE in App.jsx
 
@@ -17,14 +15,10 @@ function jsonError(message: string, status = 400) {
   });
 }
 
-async function authenticate(request: Request): Promise<string | null> {
-  const authHeader = request.headers.get("authorization") || "";
-  if (!authHeader.startsWith("Bearer ")) return null;
-  const token = authHeader.slice(7);
-  if (!token) return null;
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) return null;
-  return data.user.id;
+async function authenticate(): Promise<string | null> {
+  const { getSessionUser } = await import("../../session.server");
+  const user = await getSessionUser();
+  return user?.id ?? null;
 }
 
 // Object keys are always `${userId}/...` (see buildStorageKey in
@@ -38,7 +32,7 @@ export const Route = createFileRoute("/api/spaces-storage")({
     handlers: {
       POST: async ({ request }) => {
         try {
-          const userId = await authenticate(request);
+          const userId = await authenticate();
           if (!userId) return jsonError("Unauthorized", 401);
 
           const form = await request.formData();
@@ -62,7 +56,7 @@ export const Route = createFileRoute("/api/spaces-storage")({
 
       GET: async ({ request }) => {
         try {
-          const userId = await authenticate(request);
+          const userId = await authenticate();
           if (!userId) return jsonError("Unauthorized", 401);
 
           const path = new URL(request.url).searchParams.get("path") || "";
@@ -80,7 +74,7 @@ export const Route = createFileRoute("/api/spaces-storage")({
 
       DELETE: async ({ request }) => {
         try {
-          const userId = await authenticate(request);
+          const userId = await authenticate();
           if (!userId) return jsonError("Unauthorized", 401);
 
           const path = new URL(request.url).searchParams.get("path") || "";

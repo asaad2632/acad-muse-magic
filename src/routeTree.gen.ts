@@ -9,19 +9,32 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as ApiSpacesStorageRouteImport } from './routes/api/spaces-storage'
+import { Route as ApiSessionRouteImport } from './routes/api/session'
+import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiGeminiAnalyzeRouteImport } from './routes/api/gemini-analyze'
 import { Route as ApiAiChatRouteImport } from './routes/api/ai-chat'
+import { Route as ApiDataTranslationsRouteImport } from './routes/api/data/translations'
+import { Route as ApiDataSupervisorReportsRouteImport } from './routes/api/data/supervisor-reports'
+import { Route as ApiDataSupervisorQuestionsRouteImport } from './routes/api/data/supervisor-questions'
+import { Route as ApiDataSupervisorNotesRouteImport } from './routes/api/data/supervisor-notes'
+import { Route as ApiDataSupervisorMeetingsRouteImport } from './routes/api/data/supervisor-meetings'
+import { Route as ApiDataSupervisorFilesRouteImport } from './routes/api/data/supervisor-files'
+import { Route as ApiDataSupervisorDecisionsRouteImport } from './routes/api/data/supervisor-decisions'
+import { Route as ApiDataSourcesRouteImport } from './routes/api/data/sources'
+import { Route as ApiDataResearcherAnalysisRouteImport } from './routes/api/data/researcher-analysis'
+import { Route as ApiDataNotificationsRouteImport } from './routes/api/data/notifications'
+import { Route as ApiDataLibraryRouteImport } from './routes/api/data/library'
+import { Route as ApiDataDeletedBaseDocsRouteImport } from './routes/api/data/deleted-base-docs'
+import { Route as ApiDataCustomFormatsRouteImport } from './routes/api/data/custom-formats'
+import { Route as ApiDataChaptersRouteImport } from './routes/api/data/chapters'
+import { Route as ApiDataCardsRouteImport } from './routes/api/data/cards'
+import { Route as ApiDataBibliographyRouteImport } from './routes/api/data/bibliography'
 
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -41,6 +54,21 @@ const ApiSpacesStorageRoute = ApiSpacesStorageRouteImport.update({
   path: '/api/spaces-storage',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiSessionRoute = ApiSessionRouteImport.update({
+  id: '/api/session',
+  path: '/api/session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLogoutRoute = ApiLogoutRouteImport.update({
+  id: '/api/logout',
+  path: '/api/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiLoginRoute = ApiLoginRouteImport.update({
+  id: '/api/login',
+  path: '/api/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiGeminiAnalyzeRoute = ApiGeminiAnalyzeRouteImport.update({
   id: '/api/gemini-analyze',
   path: '/api/gemini-analyze',
@@ -51,79 +79,283 @@ const ApiAiChatRoute = ApiAiChatRouteImport.update({
   path: '/api/ai-chat',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDataTranslationsRoute = ApiDataTranslationsRouteImport.update({
+  id: '/api/data/translations',
+  path: '/api/data/translations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataSupervisorReportsRoute =
+  ApiDataSupervisorReportsRouteImport.update({
+    id: '/api/data/supervisor-reports',
+    path: '/api/data/supervisor-reports',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDataSupervisorQuestionsRoute =
+  ApiDataSupervisorQuestionsRouteImport.update({
+    id: '/api/data/supervisor-questions',
+    path: '/api/data/supervisor-questions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDataSupervisorNotesRoute = ApiDataSupervisorNotesRouteImport.update({
+  id: '/api/data/supervisor-notes',
+  path: '/api/data/supervisor-notes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataSupervisorMeetingsRoute =
+  ApiDataSupervisorMeetingsRouteImport.update({
+    id: '/api/data/supervisor-meetings',
+    path: '/api/data/supervisor-meetings',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDataSupervisorFilesRoute = ApiDataSupervisorFilesRouteImport.update({
+  id: '/api/data/supervisor-files',
+  path: '/api/data/supervisor-files',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataSupervisorDecisionsRoute =
+  ApiDataSupervisorDecisionsRouteImport.update({
+    id: '/api/data/supervisor-decisions',
+    path: '/api/data/supervisor-decisions',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDataSourcesRoute = ApiDataSourcesRouteImport.update({
+  id: '/api/data/sources',
+  path: '/api/data/sources',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataResearcherAnalysisRoute =
+  ApiDataResearcherAnalysisRouteImport.update({
+    id: '/api/data/researcher-analysis',
+    path: '/api/data/researcher-analysis',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiDataNotificationsRoute = ApiDataNotificationsRouteImport.update({
+  id: '/api/data/notifications',
+  path: '/api/data/notifications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataLibraryRoute = ApiDataLibraryRouteImport.update({
+  id: '/api/data/library',
+  path: '/api/data/library',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataDeletedBaseDocsRoute = ApiDataDeletedBaseDocsRouteImport.update({
+  id: '/api/data/deleted-base-docs',
+  path: '/api/data/deleted-base-docs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataCustomFormatsRoute = ApiDataCustomFormatsRouteImport.update({
+  id: '/api/data/custom-formats',
+  path: '/api/data/custom-formats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataChaptersRoute = ApiDataChaptersRouteImport.update({
+  id: '/api/data/chapters',
+  path: '/api/data/chapters',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataCardsRoute = ApiDataCardsRouteImport.update({
+  id: '/api/data/cards',
+  path: '/api/data/cards',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDataBibliographyRoute = ApiDataBibliographyRouteImport.update({
+  id: '/api/data/bibliography',
+  path: '/api/data/bibliography',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
-  '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
+  '/api/session': typeof ApiSessionRoute
   '/api/spaces-storage': typeof ApiSpacesStorageRoute
+  '/api/data/bibliography': typeof ApiDataBibliographyRoute
+  '/api/data/cards': typeof ApiDataCardsRoute
+  '/api/data/chapters': typeof ApiDataChaptersRoute
+  '/api/data/custom-formats': typeof ApiDataCustomFormatsRoute
+  '/api/data/deleted-base-docs': typeof ApiDataDeletedBaseDocsRoute
+  '/api/data/library': typeof ApiDataLibraryRoute
+  '/api/data/notifications': typeof ApiDataNotificationsRoute
+  '/api/data/researcher-analysis': typeof ApiDataResearcherAnalysisRoute
+  '/api/data/sources': typeof ApiDataSourcesRoute
+  '/api/data/supervisor-decisions': typeof ApiDataSupervisorDecisionsRoute
+  '/api/data/supervisor-files': typeof ApiDataSupervisorFilesRoute
+  '/api/data/supervisor-meetings': typeof ApiDataSupervisorMeetingsRoute
+  '/api/data/supervisor-notes': typeof ApiDataSupervisorNotesRoute
+  '/api/data/supervisor-questions': typeof ApiDataSupervisorQuestionsRoute
+  '/api/data/supervisor-reports': typeof ApiDataSupervisorReportsRoute
+  '/api/data/translations': typeof ApiDataTranslationsRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
-  '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
+  '/api/session': typeof ApiSessionRoute
   '/api/spaces-storage': typeof ApiSpacesStorageRoute
   '/': typeof AuthenticatedIndexRoute
+  '/api/data/bibliography': typeof ApiDataBibliographyRoute
+  '/api/data/cards': typeof ApiDataCardsRoute
+  '/api/data/chapters': typeof ApiDataChaptersRoute
+  '/api/data/custom-formats': typeof ApiDataCustomFormatsRoute
+  '/api/data/deleted-base-docs': typeof ApiDataDeletedBaseDocsRoute
+  '/api/data/library': typeof ApiDataLibraryRoute
+  '/api/data/notifications': typeof ApiDataNotificationsRoute
+  '/api/data/researcher-analysis': typeof ApiDataResearcherAnalysisRoute
+  '/api/data/sources': typeof ApiDataSourcesRoute
+  '/api/data/supervisor-decisions': typeof ApiDataSupervisorDecisionsRoute
+  '/api/data/supervisor-files': typeof ApiDataSupervisorFilesRoute
+  '/api/data/supervisor-meetings': typeof ApiDataSupervisorMeetingsRoute
+  '/api/data/supervisor-notes': typeof ApiDataSupervisorNotesRoute
+  '/api/data/supervisor-questions': typeof ApiDataSupervisorQuestionsRoute
+  '/api/data/supervisor-reports': typeof ApiDataSupervisorReportsRoute
+  '/api/data/translations': typeof ApiDataTranslationsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
-  '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/login': typeof ApiLoginRoute
+  '/api/logout': typeof ApiLogoutRoute
+  '/api/session': typeof ApiSessionRoute
   '/api/spaces-storage': typeof ApiSpacesStorageRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
+  '/api/data/bibliography': typeof ApiDataBibliographyRoute
+  '/api/data/cards': typeof ApiDataCardsRoute
+  '/api/data/chapters': typeof ApiDataChaptersRoute
+  '/api/data/custom-formats': typeof ApiDataCustomFormatsRoute
+  '/api/data/deleted-base-docs': typeof ApiDataDeletedBaseDocsRoute
+  '/api/data/library': typeof ApiDataLibraryRoute
+  '/api/data/notifications': typeof ApiDataNotificationsRoute
+  '/api/data/researcher-analysis': typeof ApiDataResearcherAnalysisRoute
+  '/api/data/sources': typeof ApiDataSourcesRoute
+  '/api/data/supervisor-decisions': typeof ApiDataSupervisorDecisionsRoute
+  '/api/data/supervisor-files': typeof ApiDataSupervisorFilesRoute
+  '/api/data/supervisor-meetings': typeof ApiDataSupervisorMeetingsRoute
+  '/api/data/supervisor-notes': typeof ApiDataSupervisorNotesRoute
+  '/api/data/supervisor-questions': typeof ApiDataSupervisorQuestionsRoute
+  '/api/data/supervisor-reports': typeof ApiDataSupervisorReportsRoute
+  '/api/data/translations': typeof ApiDataTranslationsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/auth'
-    | '/reset-password'
     | '/api/ai-chat'
     | '/api/gemini-analyze'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/session'
     | '/api/spaces-storage'
+    | '/api/data/bibliography'
+    | '/api/data/cards'
+    | '/api/data/chapters'
+    | '/api/data/custom-formats'
+    | '/api/data/deleted-base-docs'
+    | '/api/data/library'
+    | '/api/data/notifications'
+    | '/api/data/researcher-analysis'
+    | '/api/data/sources'
+    | '/api/data/supervisor-decisions'
+    | '/api/data/supervisor-files'
+    | '/api/data/supervisor-meetings'
+    | '/api/data/supervisor-notes'
+    | '/api/data/supervisor-questions'
+    | '/api/data/supervisor-reports'
+    | '/api/data/translations'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/auth'
-    | '/reset-password'
     | '/api/ai-chat'
     | '/api/gemini-analyze'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/session'
     | '/api/spaces-storage'
     | '/'
+    | '/api/data/bibliography'
+    | '/api/data/cards'
+    | '/api/data/chapters'
+    | '/api/data/custom-formats'
+    | '/api/data/deleted-base-docs'
+    | '/api/data/library'
+    | '/api/data/notifications'
+    | '/api/data/researcher-analysis'
+    | '/api/data/sources'
+    | '/api/data/supervisor-decisions'
+    | '/api/data/supervisor-files'
+    | '/api/data/supervisor-meetings'
+    | '/api/data/supervisor-notes'
+    | '/api/data/supervisor-questions'
+    | '/api/data/supervisor-reports'
+    | '/api/data/translations'
   id:
     | '__root__'
     | '/_authenticated'
     | '/auth'
-    | '/reset-password'
     | '/api/ai-chat'
     | '/api/gemini-analyze'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/session'
     | '/api/spaces-storage'
     | '/_authenticated/'
+    | '/api/data/bibliography'
+    | '/api/data/cards'
+    | '/api/data/chapters'
+    | '/api/data/custom-formats'
+    | '/api/data/deleted-base-docs'
+    | '/api/data/library'
+    | '/api/data/notifications'
+    | '/api/data/researcher-analysis'
+    | '/api/data/sources'
+    | '/api/data/supervisor-decisions'
+    | '/api/data/supervisor-files'
+    | '/api/data/supervisor-meetings'
+    | '/api/data/supervisor-notes'
+    | '/api/data/supervisor-questions'
+    | '/api/data/supervisor-reports'
+    | '/api/data/translations'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
-  ResetPasswordRoute: typeof ResetPasswordRoute
   ApiAiChatRoute: typeof ApiAiChatRoute
   ApiGeminiAnalyzeRoute: typeof ApiGeminiAnalyzeRoute
+  ApiLoginRoute: typeof ApiLoginRoute
+  ApiLogoutRoute: typeof ApiLogoutRoute
+  ApiSessionRoute: typeof ApiSessionRoute
   ApiSpacesStorageRoute: typeof ApiSpacesStorageRoute
+  ApiDataBibliographyRoute: typeof ApiDataBibliographyRoute
+  ApiDataCardsRoute: typeof ApiDataCardsRoute
+  ApiDataChaptersRoute: typeof ApiDataChaptersRoute
+  ApiDataCustomFormatsRoute: typeof ApiDataCustomFormatsRoute
+  ApiDataDeletedBaseDocsRoute: typeof ApiDataDeletedBaseDocsRoute
+  ApiDataLibraryRoute: typeof ApiDataLibraryRoute
+  ApiDataNotificationsRoute: typeof ApiDataNotificationsRoute
+  ApiDataResearcherAnalysisRoute: typeof ApiDataResearcherAnalysisRoute
+  ApiDataSourcesRoute: typeof ApiDataSourcesRoute
+  ApiDataSupervisorDecisionsRoute: typeof ApiDataSupervisorDecisionsRoute
+  ApiDataSupervisorFilesRoute: typeof ApiDataSupervisorFilesRoute
+  ApiDataSupervisorMeetingsRoute: typeof ApiDataSupervisorMeetingsRoute
+  ApiDataSupervisorNotesRoute: typeof ApiDataSupervisorNotesRoute
+  ApiDataSupervisorQuestionsRoute: typeof ApiDataSupervisorQuestionsRoute
+  ApiDataSupervisorReportsRoute: typeof ApiDataSupervisorReportsRoute
+  ApiDataTranslationsRoute: typeof ApiDataTranslationsRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -152,6 +384,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSpacesStorageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/session': {
+      id: '/api/session'
+      path: '/api/session'
+      fullPath: '/api/session'
+      preLoaderRoute: typeof ApiSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/logout': {
+      id: '/api/logout'
+      path: '/api/logout'
+      fullPath: '/api/logout'
+      preLoaderRoute: typeof ApiLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/login': {
+      id: '/api/login'
+      path: '/api/login'
+      fullPath: '/api/login'
+      preLoaderRoute: typeof ApiLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/gemini-analyze': {
       id: '/api/gemini-analyze'
       path: '/api/gemini-analyze'
@@ -164,6 +417,118 @@ declare module '@tanstack/react-router' {
       path: '/api/ai-chat'
       fullPath: '/api/ai-chat'
       preLoaderRoute: typeof ApiAiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/translations': {
+      id: '/api/data/translations'
+      path: '/api/data/translations'
+      fullPath: '/api/data/translations'
+      preLoaderRoute: typeof ApiDataTranslationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-reports': {
+      id: '/api/data/supervisor-reports'
+      path: '/api/data/supervisor-reports'
+      fullPath: '/api/data/supervisor-reports'
+      preLoaderRoute: typeof ApiDataSupervisorReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-questions': {
+      id: '/api/data/supervisor-questions'
+      path: '/api/data/supervisor-questions'
+      fullPath: '/api/data/supervisor-questions'
+      preLoaderRoute: typeof ApiDataSupervisorQuestionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-notes': {
+      id: '/api/data/supervisor-notes'
+      path: '/api/data/supervisor-notes'
+      fullPath: '/api/data/supervisor-notes'
+      preLoaderRoute: typeof ApiDataSupervisorNotesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-meetings': {
+      id: '/api/data/supervisor-meetings'
+      path: '/api/data/supervisor-meetings'
+      fullPath: '/api/data/supervisor-meetings'
+      preLoaderRoute: typeof ApiDataSupervisorMeetingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-files': {
+      id: '/api/data/supervisor-files'
+      path: '/api/data/supervisor-files'
+      fullPath: '/api/data/supervisor-files'
+      preLoaderRoute: typeof ApiDataSupervisorFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/supervisor-decisions': {
+      id: '/api/data/supervisor-decisions'
+      path: '/api/data/supervisor-decisions'
+      fullPath: '/api/data/supervisor-decisions'
+      preLoaderRoute: typeof ApiDataSupervisorDecisionsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/sources': {
+      id: '/api/data/sources'
+      path: '/api/data/sources'
+      fullPath: '/api/data/sources'
+      preLoaderRoute: typeof ApiDataSourcesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/researcher-analysis': {
+      id: '/api/data/researcher-analysis'
+      path: '/api/data/researcher-analysis'
+      fullPath: '/api/data/researcher-analysis'
+      preLoaderRoute: typeof ApiDataResearcherAnalysisRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/notifications': {
+      id: '/api/data/notifications'
+      path: '/api/data/notifications'
+      fullPath: '/api/data/notifications'
+      preLoaderRoute: typeof ApiDataNotificationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/library': {
+      id: '/api/data/library'
+      path: '/api/data/library'
+      fullPath: '/api/data/library'
+      preLoaderRoute: typeof ApiDataLibraryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/deleted-base-docs': {
+      id: '/api/data/deleted-base-docs'
+      path: '/api/data/deleted-base-docs'
+      fullPath: '/api/data/deleted-base-docs'
+      preLoaderRoute: typeof ApiDataDeletedBaseDocsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/custom-formats': {
+      id: '/api/data/custom-formats'
+      path: '/api/data/custom-formats'
+      fullPath: '/api/data/custom-formats'
+      preLoaderRoute: typeof ApiDataCustomFormatsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/chapters': {
+      id: '/api/data/chapters'
+      path: '/api/data/chapters'
+      fullPath: '/api/data/chapters'
+      preLoaderRoute: typeof ApiDataChaptersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/cards': {
+      id: '/api/data/cards'
+      path: '/api/data/cards'
+      fullPath: '/api/data/cards'
+      preLoaderRoute: typeof ApiDataCardsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/data/bibliography': {
+      id: '/api/data/bibliography'
+      path: '/api/data/bibliography'
+      fullPath: '/api/data/bibliography'
+      preLoaderRoute: typeof ApiDataBibliographyRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -183,10 +548,28 @@ const AuthenticatedRouteRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
-  ResetPasswordRoute: ResetPasswordRoute,
   ApiAiChatRoute: ApiAiChatRoute,
   ApiGeminiAnalyzeRoute: ApiGeminiAnalyzeRoute,
+  ApiLoginRoute: ApiLoginRoute,
+  ApiLogoutRoute: ApiLogoutRoute,
+  ApiSessionRoute: ApiSessionRoute,
   ApiSpacesStorageRoute: ApiSpacesStorageRoute,
+  ApiDataBibliographyRoute: ApiDataBibliographyRoute,
+  ApiDataCardsRoute: ApiDataCardsRoute,
+  ApiDataChaptersRoute: ApiDataChaptersRoute,
+  ApiDataCustomFormatsRoute: ApiDataCustomFormatsRoute,
+  ApiDataDeletedBaseDocsRoute: ApiDataDeletedBaseDocsRoute,
+  ApiDataLibraryRoute: ApiDataLibraryRoute,
+  ApiDataNotificationsRoute: ApiDataNotificationsRoute,
+  ApiDataResearcherAnalysisRoute: ApiDataResearcherAnalysisRoute,
+  ApiDataSourcesRoute: ApiDataSourcesRoute,
+  ApiDataSupervisorDecisionsRoute: ApiDataSupervisorDecisionsRoute,
+  ApiDataSupervisorFilesRoute: ApiDataSupervisorFilesRoute,
+  ApiDataSupervisorMeetingsRoute: ApiDataSupervisorMeetingsRoute,
+  ApiDataSupervisorNotesRoute: ApiDataSupervisorNotesRoute,
+  ApiDataSupervisorQuestionsRoute: ApiDataSupervisorQuestionsRoute,
+  ApiDataSupervisorReportsRoute: ApiDataSupervisorReportsRoute,
+  ApiDataTranslationsRoute: ApiDataTranslationsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

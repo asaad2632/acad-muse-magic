@@ -1,6 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 
 function AuthPage() {
   const navigate = useNavigate();
@@ -10,17 +9,12 @@ function AuthPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // If this is a Supabase password-recovery callback, forward to /reset-password
-    // (preserving the hash so the recovery tokens survive the redirect).
-    if (typeof window !== "undefined" && window.location.hash.includes("type=recovery")) {
-      const hash = window.location.hash;
-      window.location.replace("/reset-password" + hash);
-      return;
-    }
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session) navigate({ to: "/" });
-    });
+    fetch("/api/session")
+      .then((r) => r.json())
+      .then(({ user }) => {
+        if (user) navigate({ to: "/" });
+      })
+      .catch(() => {});
   }, [navigate]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -28,17 +22,17 @@ function AuthPage() {
     setLoading(true);
     setError(null);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        console.error("[auth] signIn error:", error);
-        setError("بيانات الدخول غير صحيحة");
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "بيانات الدخول غير صحيحة");
         return;
       }
-      if (data.session) {
-        window.location.href = "/";
-      } else {
-        setError("بيانات الدخول غير صحيحة");
-      }
+      window.location.href = "/";
     } catch (err: any) {
       console.error("[auth] unexpected:", err);
       setError("حدث خطأ غير متوقع");

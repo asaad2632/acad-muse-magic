@@ -20,6 +20,9 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Netlify (stale — no longer the deploy target, see CLAUDE.md)
+.netlify/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

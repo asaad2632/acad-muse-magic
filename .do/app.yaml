@@ -1,0 +1,54 @@
+# DigitalOcean App Platform spec for the AcadArchiv staging/test environment.
+# Apply with: doctl apps create --spec .do/app.yaml
+# (or update an existing app: doctl apps update <app-id> --spec .do/app.yaml)
+#
+# SECRET-type env values are NOT stored here — doctl/the dashboard prompts
+# for them on first apply and encrypts them at rest. Never put real key
+# values in this file since it's committed to git.
+name: acadarchiv-staging
+region: fra
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    source_dir: /
+    github:
+      repo: asaad2632/acad-muse-magic
+      branch: migrate/digitalocean
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /api/session
+      initial_delay_seconds: 10
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        type: SECRET
+      - key: SESSION_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: GROQ_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: GEMINI_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: OPENROUTER_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_SECRET
+        scope: RUN_TIME
+        type: SECRET
+      - key: DO_SPACES_REGION
+        scope: RUN_TIME
+        value: fra1
+      - key: DO_SPACES_BUCKET
+        scope: RUN_TIME
+        value: acadarchiv-storage
+      - key: DO_SPACES_ENDPOINT
+        scope: RUN_TIME
+        value: https://fra1.digitaloceanspaces.com

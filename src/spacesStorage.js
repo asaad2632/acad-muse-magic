@@ -4,9 +4,9 @@
 //
 // SECURITY: DO_SPACES_SECRET is a signing key, not a bearer token — it must
 // never reach the client bundle. Only import this module from server code
-// (a route under src/routes/api/*, or another server-only module), the same
-// way src/integrations/supabase/client.server.ts is used. Never import it
-// from App.jsx, cloudSync.js, or any other file that ships to the browser.
+// (a route under src/routes/api/*, or another server-only module). Never
+// import it from App.jsx, cloudSync.js, or any other file that ships to
+// the browser.
 //
 // Mirrors the upload/getUrl/delete shape of the Supabase Storage helpers in
 // cloudSync.js (uploadLibraryFile / getLibraryFileUrl / deleteLibraryFile)

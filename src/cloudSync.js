@@ -1,17 +1,51 @@
-// Phase 3a cloud sync layer (chapters + user-added sources + deleted base docs).
-// Keeps localStorage as a fast cache during this phase; Supabase is source of truth.
-import { supabase } from "@/integrations/supabase/client";
+// Cloud sync layer — talks to /api/data/* (DigitalOcean Postgres) instead of
+// Supabase. Keeps localStorage as a fast cache; the server is source of truth.
+// Every exported function here keeps its original name/signature so App.jsx,
+// SupervisorRoom.jsx, and NotificationBell.jsx need no changes.
 
-// ---------- helpers ----------
-async function uid() {
-  const { data } = await supabase.auth.getUser();
-  return data?.user?.id || null;
+// ---------- generic fetch helpers ----------
+// Identity comes from the httpOnly session cookie (sent automatically on
+// same-origin requests) — no bearer token, no client-side uid() lookup.
+async function apiGet(path) {
+  const res = await fetch(path);
+  if (!res.ok) {
+    if (res.status !== 401) console.warn(`[apiGet:${path}]`, res.status, await res.text().catch(() => ""));
+    return null;
+  }
+  return res.json();
+}
+
+async function apiSend(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    console.warn(`[api${method}:${path}]`, res.status, await res.text().catch(() => ""));
+    return { ok: false, status: res.status };
+  }
+  return res.json().catch(() => ({ ok: true }));
+}
+
+// Cached "who am I" — only used where client code needs to know its own
+// identity (filtering which Supervisor Room rows are mine to push). Never
+// used to authorize writes; the server always derives the real owner from
+// the session cookie itself, independent of anything sent here.
+let _sessionPromise = null;
+async function getSession() {
+  if (!_sessionPromise) {
+    _sessionPromise = fetch("/api/session")
+      .then((r) => r.json())
+      .then((d) => d.user || null)
+      .catch(() => null);
+  }
+  return _sessionPromise;
 }
 
 // Map a user-added doc (local shape) into a sources-table row.
-function docToRow(doc, userId) {
+function docToRow(doc) {
   return {
-    user_id: userId,
     client_id: String(doc.id),
     title: doc.title ?? null,
     author: doc.author ?? null,
@@ -79,21 +113,19 @@ function rowToDoc(row) {
 
 // ---------- LOAD (call once on app mount, after auth) ----------
 export async function loadPhase3a(defaultChapters) {
-  const userId = await uid();
-  if (!userId) return null;
-
-  const [chaptersRes, sourcesRes, delRes] = await Promise.all([
-    supabase.from("chapters").select("*").order("chapter_id"),
-    supabase.from("sources").select("*").not("client_id", "is", null),
-    supabase.from("deleted_base_docs").select("base_doc_id"),
+  const [chaptersRows, sourcesRows, delRows] = await Promise.all([
+    apiGet("/api/data/chapters"),
+    apiGet("/api/data/sources"),
+    apiGet("/api/data/deleted-base-docs"),
   ]);
+  if (!chaptersRows && !sourcesRows && !delRows) return null;
 
   // Chapters: merge DB rows over defaults (by chapter_id). Shared workspace —
   // if multiple users edited the same chapter, take the most recently updated row.
   let chapters = defaultChapters.map(ch => ({ ...ch, sections: ch.sections.map(s => ({ ...s })) }));
-  if (chaptersRes.data && chaptersRes.data.length) {
+  if (chaptersRows && chaptersRows.length) {
     const byId = new Map();
-    for (const r of chaptersRes.data) {
+    for (const r of chaptersRows) {
       const prev = byId.get(r.chapter_id);
       if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) byId.set(r.chapter_id, r);
     }
@@ -111,62 +143,39 @@ export async function loadPhase3a(defaultChapters) {
 
   // User-added sources: dedupe across users by client_id (latest update wins).
   const docMap = new Map();
-  for (const r of (sourcesRes.data || [])) {
+  for (const r of (sourcesRows || [])) {
     const prev = docMap.get(r.client_id);
     if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) docMap.set(r.client_id, r);
   }
   const userDocs = [...docMap.values()].map(rowToDoc);
 
   // Deleted base docs: union across the workspace.
-  const deletedBaseDocs = new Set((delRes.data || []).map(r => r.base_doc_id));
+  const deletedBaseDocs = new Set((delRows || []).map(r => r.base_doc_id));
 
   return { chapters, userDocs, deletedBaseDocs };
 }
 
 // ---------- WRITE: chapters (full upsert; cheap — small number of rows) ----------
 export async function syncChapters(chapters) {
-  const userId = await uid();
-  if (!userId) return;
   const rows = chapters.map(ch => ({
-    user_id: userId,
     chapter_id: ch.id,
     title_ar: ch.titleAr || null,
     color: ch.color || null,
     sections: ch.sections || [],
   }));
-  await supabase.from("chapters").upsert(rows, { onConflict: "user_id,chapter_id" });
+  await apiSend("POST", "/api/data/chapters", rows);
 }
 
 // ---------- WRITE: user-added sources (full sync vs current set) ----------
 export async function syncUserDocs(userDocs) {
-  const userId = await uid();
-  if (!userId) return;
-  const rows = userDocs.map(d => docToRow(d, userId));
-
-  // Upsert current set
-  if (rows.length) {
-    await supabase.from("sources").upsert(rows, { onConflict: "user_id,client_id" });
-  }
-
-  // Delete DB rows whose client_id is no longer present locally
-  const keepIds = rows.map(r => r.client_id);
-  let del = supabase.from("sources").delete().eq("user_id", userId).not("client_id", "is", null);
-  if (keepIds.length) del = del.not("client_id", "in", `(${keepIds.map(id => `"${id}"`).join(",")})`);
-  await del;
+  const rows = userDocs.map(docToRow);
+  await apiSend("POST", "/api/data/sources", rows);
 }
 
 // ---------- WRITE: deleted base docs (full sync) ----------
 export async function syncDeletedBaseDocs(deletedSet) {
-  const userId = await uid();
-  if (!userId) return;
   const ids = [...deletedSet].map(Number).filter(Number.isFinite);
-  // Wipe then insert (small set — fine)
-  await supabase.from("deleted_base_docs").delete().eq("user_id", userId);
-  if (ids.length) {
-    await supabase.from("deleted_base_docs").insert(
-      ids.map(base_doc_id => ({ user_id: userId, base_doc_id }))
-    );
-  }
+  await apiSend("POST", "/api/data/deleted-base-docs", ids);
 }
 
 // ---------- debounce helper ----------
@@ -179,24 +188,15 @@ export function debounce(fn, ms = 600) {
 }
 
 // ==================== Phase 3b: library_sources + Storage ====================
-
 // File bytes live in DigitalOcean Spaces, proxied through /api/spaces-storage
-// (see src/routes/api/spaces-storage.ts + src/spacesStorage.js) so the Spaces
-// secret key never reaches the client. Supabase Auth still gates access: the
-// session's access_token is sent as a Bearer header, and the server derives
-// the storage key/ownership from it — callers here never see or set userId.
-async function spacesAuthHeader() {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
-  return token ? { Authorization: `Bearer ${token}` } : null;
-}
+// (see src/routes/api/spaces-storage.ts + src/spacesStorage.js). Auth is the
+// same session cookie as everything else — no manual header needed.
 
 async function uploadToSpaces(file) {
-  const headers = await spacesAuthHeader();
-  if (!headers || !file) return null;
+  if (!file) return null;
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch("/api/spaces-storage", { method: "POST", headers, body: form });
+  const res = await fetch("/api/spaces-storage", { method: "POST", body: form });
   if (!res.ok) { console.warn("[uploadToSpaces]", res.status, await res.text().catch(() => "")); return null; }
   const data = await res.json();
   return data?.storagePath || null;
@@ -204,9 +204,7 @@ async function uploadToSpaces(file) {
 
 async function getSpacesFileUrl(path) {
   if (!path) return null;
-  const headers = await spacesAuthHeader();
-  if (!headers) return null;
-  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`, { headers });
+  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`);
   if (!res.ok) { console.warn("[getSpacesFileUrl]", res.status, await res.text().catch(() => "")); return null; }
   const data = await res.json();
   return data?.signedUrl || null;
@@ -214,15 +212,12 @@ async function getSpacesFileUrl(path) {
 
 async function deleteFromSpaces(path) {
   if (!path) return;
-  const headers = await spacesAuthHeader();
-  if (!headers) return;
-  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`, { method: "DELETE", headers });
+  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`, { method: "DELETE" });
   if (!res.ok) console.warn("[deleteFromSpaces]", res.status, await res.text().catch(() => ""));
 }
 
-function libToRow(s, userId) {
+function libToRow(s) {
   return {
-    user_id: userId,
     client_id: String(s.id),
     file_name: s.fileName ?? null,
     file_type: s.fileType ?? null,
@@ -298,97 +293,34 @@ export async function deleteLibraryFile(path) {
 }
 
 export async function loadLibrary() {
-  const userId = await uid();
-  if (!userId) return [];
-  const { data, error } = await supabase
-    .from("library_sources")
-    .select("*")
-    .not("client_id", "is", null);
-  if (error) { console.warn("[loadLibrary]", error); return []; }
+  const rows = await apiGet("/api/data/library");
+  if (!rows) return [];
   // Shared workspace dedupe by client_id, latest updated_at wins
   const map = new Map();
-  for (const r of data || []) {
+  for (const r of rows) {
     const prev = map.get(r.client_id);
     if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) map.set(r.client_id, r);
   }
   return [...map.values()].map(rowToLib);
 }
 
+// Bulk "sync whole set" — kept for API compatibility, not currently called
+// from App.jsx (per-row insert/update/delete below is what the UI uses).
 export async function syncLibrary(libraryArr) {
-  const userId = await uid();
-  if (!userId) return;
-  const rows = libraryArr.map(s => libToRow(s, userId));
-  if (rows.length) {
-    const { error } = await supabase.from("library_sources").upsert(rows, { onConflict: "user_id,client_id" });
-    if (error) console.warn("[syncLibrary:upsert]", error);
+  for (const s of libraryArr) {
+    await apiSend("POST", "/api/data/library", libToRow(s));
   }
-  const keepIds = rows.map(r => r.client_id);
-  let del = supabase.from("library_sources").delete().eq("user_id", userId).not("client_id", "is", null);
-  if (keepIds.length) del = del.not("client_id", "in", `(${keepIds.map(id => `"${id}"`).join(",")})`);
-  const { error: delError } = await del;
-  if (delError) console.warn("[syncLibrary:delete]", delError);
-}
-
-// Direct per-row writes (Phase 3b hardening — used by My Library UI so data
-// lands in library_sources immediately without waiting for debounce).
-//
-// Hardened Jan-2026:
-//   1. Retry with exponential backoff (500ms/2s/5s) for transient failures.
-//   2. Error classification so the UI can distinguish permanent auth/RLS
-//      failures from transient network issues.
-//   3. INSERT-then-UPDATE fallback instead of relying on `.upsert()` —
-//      because the historical partial unique index
-//      (`... WHERE client_id IS NOT NULL`) does NOT satisfy PostgREST's
-//      ON CONFLICT requirement, so upsert was silently failing with
-//      42P10 for every library upload. This path works with or without
-//      a schema-level unique constraint.
-function classifyError(error, status) {
-  if (!error) return null;
-  const msg = String(error.message || error || "").toLowerCase();
-  const code = error.code || "";
-  if (code === "42501" || status === 403 || msg.includes("row-level security")) return "rls";
-  if (status === 401 || msg.includes("jwt") || msg.includes("expired") || msg.includes("invalid token")) return "jwt";
-  if (msg.includes("failed to fetch") || msg.includes("network") || msg.includes("timeout") || msg.includes("aborted")) return "network";
-  return "unknown";
-}
-
-async function _writeLibraryRowWithRetry(userId, row) {
-  const delays = [500, 2000, 5000];
-  let lastError = null, lastStatus = null;
-  for (let attempt = 0; attempt <= delays.length; attempt++) {
-    // 1st path: try INSERT.
-    let { error, status } = await supabase.from("library_sources").insert(row);
-    if (!error) return { error: null, errorType: null, path: "insert", attempts: attempt + 1 };
-    // Duplicate key → row exists, fall back to UPDATE.
-    if (error.code === "23505" || status === 409) {
-      const upd = await supabase
-        .from("library_sources").update(row)
-        .eq("user_id", userId).eq("client_id", row.client_id);
-      if (!upd.error) return { error: null, errorType: null, path: "update", attempts: attempt + 1 };
-      error = upd.error; status = upd.status;
-    }
-    lastError = error; lastStatus = status;
-    const type = classifyError(error, status);
-    console.warn(`[insertLibraryRow attempt ${attempt + 1}/${delays.length + 1}] type=${type}`, error);
-    // Permanent errors — don't retry.
-    if (type === "rls" || type === "jwt") break;
-    if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
-  }
-  return { error: lastError, errorType: classifyError(lastError, lastStatus), attempts: delays.length + 1 };
 }
 
 export async function insertLibraryRow(src) {
-  const userId = await uid();
-  if (!userId) return { error: new Error("no-user"), errorType: "no-user" };
-  const row = libToRow(src, userId);
-  return _writeLibraryRowWithRetry(userId, row);
+  const res = await apiSend("POST", "/api/data/library", libToRow(src));
+  if (res.ok === false) return { error: new Error(`http-${res.status}`), errorType: "http" };
+  return { error: null, errorType: null };
 }
 
 export async function updateLibraryRow(clientId, changes) {
-  const userId = await uid();
-  if (!userId) return { error: new Error("no-user"), errorType: "no-user" };
   // Build a partial row using libToRow mapping, then keep only fields present in `changes`.
-  const full = libToRow({ id: clientId, ...changes }, userId);
+  const full = libToRow({ id: clientId, ...changes });
   const patch = {};
   const map = {
     fileName:"file_name", fileType:"file_type", fileSize:"file_size", uploadDate:"upload_date",
@@ -402,86 +334,46 @@ export async function updateLibraryRow(clientId, changes) {
   for (const k of Object.keys(changes)) {
     if (map[k]) patch[map[k]] = full[map[k]];
   }
-  patch.updated_at = new Date().toISOString();
-  const delays = [500, 2000, 5000];
-  let lastError = null, lastStatus = null;
-  for (let attempt = 0; attempt <= delays.length; attempt++) {
-    const { error, status } = await supabase
-      .from("library_sources")
-      .update(patch)
-      .eq("user_id", userId)
-      .eq("client_id", String(clientId));
-    if (!error) return { error: null, errorType: null };
-    lastError = error; lastStatus = status;
-    const type = classifyError(error, status);
-    console.warn(`[updateLibraryRow attempt ${attempt + 1}/${delays.length + 1}] type=${type}`, error);
-    if (type === "rls" || type === "jwt") break;
-    if (attempt < delays.length) await new Promise(r => setTimeout(r, delays[attempt]));
-  }
-  return { error: lastError, errorType: classifyError(lastError, lastStatus) };
+  const res = await apiSend("PATCH", "/api/data/library", { clientId: String(clientId), patch });
+  if (res.ok === false) return { error: new Error(`http-${res.status}`), errorType: "http" };
+  return { error: null, errorType: null };
 }
 
 export async function deleteLibraryRow(clientId) {
-  const userId = await uid();
-  if (!userId) return { error: new Error("no-user") };
-  const { error } = await supabase
-    .from("library_sources")
-    .delete()
-    .eq("user_id", userId)
-    .eq("client_id", String(clientId));
-  if (error) console.warn("[deleteLibraryRow]", error);
-  return { error };
+  const res = await apiSend("DELETE", `/api/data/library?clientId=${encodeURIComponent(String(clientId))}`);
+  if (res.ok === false) return { error: new Error(`http-${res.status}`) };
+  return { error: null };
 }
 
 // Bulk delete: single round-trip for a list of client_ids. Used by the
 // multi-select "delete selected" flow in the Library page so we don't fire
 // one request per row (240 rows would otherwise = 240 requests).
 export async function deleteLibraryRows(clientIds) {
-  const userId = await uid();
-  if (!userId) return { error: new Error("no-user"), count: 0 };
   const ids = (clientIds || []).map((x) => String(x)).filter(Boolean);
   if (!ids.length) return { error: null, count: 0 };
-  const { error } = await supabase
-    .from("library_sources")
-    .delete()
-    .eq("user_id", userId)
-    .in("client_id", ids);
-  if (error) console.warn("[deleteLibraryRows]", error);
-  return { error, count: ids.length };
+  const res = await apiSend("DELETE", "/api/data/library", { clientIds: ids });
+  if (res.ok === false) return { error: new Error(`http-${res.status}`), count: 0 };
+  return { error: null, count: res.count ?? ids.length };
 }
 
 
 // ==================== Phase 3c: bibliography / cards / translations / custom_formats / researcher_analysis ====================
 
 // Generic shared-workspace dedupe loader (by client_id, latest updated_at wins).
-async function loadByClientId(table) {
-  const userId = await uid();
-  if (!userId) return [];
-  const { data, error } = await supabase.from(table).select("*").not("client_id", "is", null);
-  if (error) { console.warn(`[load:${table}]`, error); return []; }
+async function loadByClientId(path) {
+  const rows = await apiGet(path);
+  if (!rows) return [];
   const map = new Map();
-  for (const r of data || []) {
+  for (const r of rows) {
     const prev = map.get(r.client_id);
     if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) map.set(r.client_id, r);
   }
   return [...map.values()];
 }
 
-// Generic set-based sync: upsert current rows + delete rows whose client_id is gone.
-async function syncSet(table, rows) {
-  const userId = await uid();
-  if (!userId) return;
-  if (rows.length) await supabase.from(table).upsert(rows, { onConflict: "user_id,client_id" });
-  const keepIds = rows.map(r => r.client_id);
-  let del = supabase.from(table).delete().eq("user_id", userId).not("client_id", "is", null);
-  if (keepIds.length) del = del.not("client_id", "in", `(${keepIds.map(id => `"${id}"`).join(",")})`);
-  await del;
-}
-
 // ---------- bibliography ----------
-function bibToRow(b, userId) {
+function bibToRow(b) {
   return {
-    user_id: userId,
     client_id: String(b.id),
     doc_id: b.docId != null ? String(b.docId) : null,
     section: b.section ?? null,
@@ -504,17 +396,14 @@ function rowToBib(r) {
     bibEntry: r.bib_entry || "", sortKey: r.sort_key || "", addedAt: r.added_at || "",
   };
 }
-export async function loadBibliography() { return (await loadByClientId("bibliography")).map(rowToBib); }
+export async function loadBibliography() { return (await loadByClientId("/api/data/bibliography")).map(rowToBib); }
 export async function syncBibliography(arr) {
-  const userId = await uid();
-  if (!userId) return;
-  await syncSet("bibliography", arr.map(b => bibToRow(b, userId)));
+  await apiSend("POST", "/api/data/bibliography", arr.map(bibToRow));
 }
 
 // ---------- cards ----------
-function cardToRow(c, userId) {
+function cardToRow(c) {
   return {
-    user_id: userId,
     client_id: String(c.id),
     title: c.title ?? null,
     topic: c.topic ?? null,
@@ -538,17 +427,14 @@ function rowToCard(r) {
     createdAt: r.added_at || "",
   };
 }
-export async function loadCards() { return (await loadByClientId("cards")).map(rowToCard); }
+export async function loadCards() { return (await loadByClientId("/api/data/cards")).map(rowToCard); }
 export async function syncCards(arr) {
-  const userId = await uid();
-  if (!userId) return;
-  await syncSet("cards", arr.map(c => cardToRow(c, userId)));
+  await apiSend("POST", "/api/data/cards", arr.map(cardToRow));
 }
 
 // ---------- translations ----------
-function trToRow(t, userId) {
+function trToRow(t) {
   return {
-    user_id: userId,
     client_id: String(t.id),
     file_name: t.fileName ?? null,
     original_text: t.originalText ?? null,
@@ -569,40 +455,32 @@ function rowToTr(r) {
     source: r.source === "gemini" ? "gemini" : "groq",
   };
 }
-export async function loadTranslations() { return (await loadByClientId("translations")).map(rowToTr); }
+export async function loadTranslations() { return (await loadByClientId("/api/data/translations")).map(rowToTr); }
 export async function syncTranslations(arr) {
-  const userId = await uid();
-  if (!userId) return;
-  await syncSet("translations", arr.map(t => trToRow(t, userId)));
+  await apiSend("POST", "/api/data/translations", arr.map(trToRow));
 }
 
 // ---------- custom_formats ----------
-function fmtToRow(f, userId, idx) {
+function fmtToRow(f, idx) {
   return {
-    user_id: userId,
     client_id: f.client_id ? String(f.client_id) : `fmt-${idx}-${f.name || ""}`,
     name: f.name ?? null,
     templates: f.templates ?? {},
   };
 }
 function rowToFmt(r) { return { name: r.name || "", templates: r.templates || {}, client_id: r.client_id }; }
-export async function loadCustomFormats() { return (await loadByClientId("custom_formats")).map(rowToFmt); }
+export async function loadCustomFormats() { return (await loadByClientId("/api/data/custom-formats")).map(rowToFmt); }
 export async function syncCustomFormats(arr) {
-  const userId = await uid();
-  if (!userId) return;
-  const rows = arr.map((f, i) => fmtToRow(f, userId, i));
-  await syncSet("custom_formats", rows);
+  await apiSend("POST", "/api/data/custom-formats", arr.map((f, i) => fmtToRow(f, i)));
 }
 
 // ---------- researcher_analysis (keyed by chapter_id/section_id) ----------
 export async function loadResearcherAnalysis() {
-  const userId = await uid();
-  if (!userId) return [];
-  const { data, error } = await supabase.from("researcher_analysis").select("*");
-  if (error) { console.warn("[loadResearcherAnalysis]", error); return []; }
+  const data = await apiGet("/api/data/researcher-analysis");
+  if (!data) return [];
   // dedupe by (chapter_id||section_id), latest wins
   const map = new Map();
-  for (const r of data || []) {
+  for (const r of data) {
     const k = `${r.chapter_id ?? ""}::${r.section_id ?? ""}`;
     const prev = map.get(k);
     if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) map.set(k, r);
@@ -615,57 +493,47 @@ export async function loadResearcherAnalysis() {
   }));
 }
 export async function syncResearcherAnalysis(arr) {
-  const userId = await uid();
-  if (!userId) return;
-  // wipe + insert is simplest (small dataset)
-  await supabase.from("researcher_analysis").delete().eq("user_id", userId);
-  if (arr.length) {
-    await supabase.from("researcher_analysis").insert(arr.map(a => ({
-      user_id: userId,
-      chapter_id: a.chapterId ?? null,
-      section_id: a.sectionId || null,
-      content: a.content || "",
-      version: a.version ?? 1,
-    })));
-  }
+  const rows = arr.map(a => ({
+    chapter_id: a.chapterId ?? null,
+    section_id: a.sectionId || null,
+    content: a.content || "",
+    version: a.version ?? 1,
+  }));
+  await apiSend("POST", "/api/data/researcher-analysis", rows);
 }
 
 // ==================== Phase 3d: Supervisor Room ====================
-// Tables use created_by / uploaded_by (not user_id). Shared workspace =
-// read all rows, dedupe by client_id (latest updated_at wins). On write,
-// upsert as the current user and only delete rows authored by current user.
+// Tables use created_by / uploaded_by (not user_id), and — unlike the
+// fully-collaborative shared tables above — items keep a respected author:
+// a supervisor's note isn't editable/deletable by the researcher and vice
+// versa. Reads are unfiltered (shared merged view, dedupe by client_id,
+// latest updated_at wins); writes only ever push the caller's own rows —
+// the server also independently only ever deletes/upserts rows scoped to
+// the authenticated caller, but filtering here too avoids resending (and
+// thus accidentally re-claiming) rows merged in from the other account.
 
-async function loadSupervisorTable(table) {
-  const userId = await uid();
-  if (!userId) return [];
-  const { data, error } = await supabase.from(table).select("*").not("client_id", "is", null);
-  if (error) { console.warn(`[load:${table}]`, error); return []; }
+async function loadSupervisorTable(path) {
+  const rows = await apiGet(path);
+  if (!rows) return [];
   const map = new Map();
-  for (const r of data || []) {
+  for (const r of rows) {
     const prev = map.get(r.client_id);
     if (!prev || new Date(r.updated_at || 0) > new Date(prev.updated_at || 0)) map.set(r.client_id, r);
   }
   return [...map.values()];
 }
 
-async function syncSupervisorTable(table, rows, ownerCol /* 'created_by' | 'uploaded_by' */) {
-  const userId = await uid();
-  if (!userId) return;
-  // Only push rows that belong to current user (avoid stomping other user's edits)
-  const myRows = rows.filter(r => r[ownerCol] === userId);
-  if (myRows.length) {
-    await supabase.from(table).upsert(myRows, { onConflict: `${ownerCol},client_id` });
-  }
-  const keepIds = myRows.map(r => r.client_id);
-  let del = supabase.from(table).delete().eq(ownerCol, userId).not("client_id", "is", null);
-  if (keepIds.length) del = del.not("client_id", "in", `(${keepIds.map(id => `"${id}"`).join(",")})`);
-  await del;
+async function syncSupervisorTable(path, arr, toRow) {
+  const user = await getSession();
+  if (!user) return;
+  const mine = arr.filter(r => !r.ownerId || r.ownerId === user.id);
+  await apiSend("POST", path, mine.map(toRow));
 }
 
 // ----- questions -----
-function qToRow(q, userId) {
+function qToRow(q) {
   return {
-    created_by: q.ownerId || userId, client_id: String(q.id),
+    client_id: String(q.id),
     chapter: q.chapter ?? null, note_type: q.type ?? null, content: q.text ?? null,
     date: q.date ?? null, priority: q.priority ?? null,
     student_reply: q.reply ?? null, status: q.status ?? null,
@@ -680,16 +548,15 @@ function rowToQ(r) {
     createdAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorQuestions() { return (await loadSupervisorTable("supervisor_questions")).map(rowToQ); }
+export async function loadSupervisorQuestions() { return (await loadSupervisorTable("/api/data/supervisor-questions")).map(rowToQ); }
 export async function syncSupervisorQuestions(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_questions", arr.map(q => qToRow(q, userId)), "created_by");
+  await syncSupervisorTable("/api/data/supervisor-questions", arr, qToRow);
 }
 
 // ----- files -----
-function fToRow(f, userId) {
+function fToRow(f) {
   return {
-    uploaded_by: f.ownerId || userId, client_id: String(f.id),
+    client_id: String(f.id),
     chapter: f.chapter ?? null, version: f.version ?? null,
     upload_date: f.date ?? null, note: f.note ?? null,
     file_name: f.fileName ?? null, file_type: f.fileType ?? null,
@@ -709,10 +576,9 @@ function rowToF(r) {
     uploadedAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorFiles() { return (await loadSupervisorTable("supervisor_files")).map(rowToF); }
+export async function loadSupervisorFiles() { return (await loadSupervisorTable("/api/data/supervisor-files")).map(rowToF); }
 export async function syncSupervisorFiles(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_files", arr.map(f => fToRow(f, userId)), "uploaded_by");
+  await syncSupervisorTable("/api/data/supervisor-files", arr, fToRow);
 }
 export async function uploadSupervisorFile(file) {
   return uploadToSpaces(file);
@@ -725,9 +591,9 @@ export async function deleteSupervisorFile(path) {
 }
 
 // ----- notes -----
-function nToRow(n, userId) {
+function nToRow(n) {
   return {
-    created_by: n.ownerId || userId, client_id: String(n.id),
+    client_id: String(n.id),
     chapter: n.chapterId != null ? String(n.chapterId) : null,
     section: n.sectionId ?? null, note_type: n.type ?? null,
     content: n.text ?? null, date: n.date ?? null, done: !!n.done,
@@ -743,16 +609,15 @@ function rowToN(r) {
     createdAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorNotes() { return (await loadSupervisorTable("supervisor_notes")).map(rowToN); }
+export async function loadSupervisorNotes() { return (await loadSupervisorTable("/api/data/supervisor-notes")).map(rowToN); }
 export async function syncSupervisorNotes(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_notes", arr.map(n => nToRow(n, userId)), "created_by");
+  await syncSupervisorTable("/api/data/supervisor-notes", arr, nToRow);
 }
 
 // ----- meetings -----
-function mToRow(m, userId) {
+function mToRow(m) {
   return {
-    created_by: m.ownerId || userId, client_id: String(m.id),
+    client_id: String(m.id),
     meeting_date: m.date ?? null, location: m.place ?? null,
     summary: m.summary ?? null, decisions: m.decisions ?? null,
     next_requirements: m.todo ?? null, next_meeting_date: m.nextDate ?? null,
@@ -767,16 +632,15 @@ function rowToM(r) {
     createdAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorMeetings() { return (await loadSupervisorTable("supervisor_meetings")).map(rowToM); }
+export async function loadSupervisorMeetings() { return (await loadSupervisorTable("/api/data/supervisor-meetings")).map(rowToM); }
 export async function syncSupervisorMeetings(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_meetings", arr.map(m => mToRow(m, userId)), "created_by");
+  await syncSupervisorTable("/api/data/supervisor-meetings", arr, mToRow);
 }
 
 // ----- decisions -----
-function dToRow(d, userId) {
+function dToRow(d) {
   return {
-    created_by: d.ownerId || userId, client_id: String(d.id),
+    client_id: String(d.id),
     subject: d.subject ?? null, decision_type: d.type ?? null,
     content: d.text ?? null, date: d.date ?? null,
   };
@@ -789,16 +653,15 @@ function rowToD(r) {
     createdAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorDecisions() { return (await loadSupervisorTable("supervisor_decisions")).map(rowToD); }
+export async function loadSupervisorDecisions() { return (await loadSupervisorTable("/api/data/supervisor-decisions")).map(rowToD); }
 export async function syncSupervisorDecisions(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_decisions", arr.map(d => dToRow(d, userId)), "created_by");
+  await syncSupervisorTable("/api/data/supervisor-decisions", arr, dToRow);
 }
 
 // ----- reports -----
-function rToRow(r, userId) {
+function rToRow(r) {
   return {
-    created_by: r.ownerId || userId, client_id: String(r.id),
+    client_id: String(r.id),
     content: r.text ?? null, saved_at: r.date ?? null,
   };
 }
@@ -809,113 +672,34 @@ function rowToR(r) {
     createdAt: r.created_at ? new Date(r.created_at).getTime() : 0,
   };
 }
-export async function loadSupervisorReports() { return (await loadSupervisorTable("supervisor_reports")).map(rowToR); }
+export async function loadSupervisorReports() { return (await loadSupervisorTable("/api/data/supervisor-reports")).map(rowToR); }
 export async function syncSupervisorReports(arr) {
-  const userId = await uid(); if (!userId) return;
-  await syncSupervisorTable("supervisor_reports", arr.map(r => rToRow(r, userId)), "created_by");
+  await syncSupervisorTable("/api/data/supervisor-reports", arr, rToRow);
 }
 
 // ==================== Phase 3: Notification Inbox ====================
 // Tracks each user's last-read timestamp for supervisor-generated activity
 // (questions / notes / decisions / files / meetings / reports). Any row in
 // those tables that (a) is authored by someone other than the current user
-// and (b) has created_at > last_read_at is counted as "unread".
+// and (b) has created_at > last_read_at is counted as "unread" — computed
+// server-side now (see src/dataAccess.server.ts's loadNotifications).
 
-const NOTIF_TABLES = [
-  { table: "supervisor_questions", ownerCol: "created_by",  type: "سؤال",   label: "سؤال جديد",     icon: "❓", tab: "questions" },
-  { table: "supervisor_notes",     ownerCol: "created_by",  type: "ملاحظة", label: "ملاحظة جديدة",  icon: "📝", tab: "notes" },
-  { table: "supervisor_decisions", ownerCol: "created_by",  type: "قرار",   label: "قرار جديد",     icon: "⚖️", tab: "decisions" },
-  { table: "supervisor_files",     ownerCol: "uploaded_by", type: "ملف",    label: "ملف مرفوع",      icon: "📎", tab: "files" },
-  { table: "supervisor_meetings",  ownerCol: "created_by",  type: "اجتماع", label: "اجتماع مسجَّل", icon: "📅", tab: "meetings" },
-  { table: "supervisor_reports",   ownerCol: "created_by",  type: "تقرير",  label: "تقرير جديد",    icon: "📊", tab: "reports" },
-];
-
-// Fetch the caller's last-read timestamp (creates row if absent).
-export async function getLastReadAt() {
-  const userId = await uid();
-  if (!userId) return null;
-  const { data } = await supabase
-    .from("notification_reads")
-    .select("last_read_at")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (data?.last_read_at) return data.last_read_at;
-  // No row yet — insert a baseline row at epoch so every subsequent write flows through UPDATE.
-  await supabase.from("notification_reads").upsert(
-    { user_id: userId, last_read_at: "1970-01-01T00:00:00Z" },
-    { onConflict: "user_id" }
-  );
-  return "1970-01-01T00:00:00Z";
-}
-
-// Mark all notifications as read (updates last_read_at to now()).
 export async function markAllNotificationsRead() {
-  const userId = await uid();
-  if (!userId) return;
-  const nowIso = new Date().toISOString();
-  await supabase.from("notification_reads").upsert(
-    { user_id: userId, last_read_at: nowIso },
-    { onConflict: "user_id" }
-  );
+  await apiSend("POST", "/api/data/notifications");
 }
 
 // Load all unread supervisor-room items authored by someone other than caller.
 // Returns { count, items: [{table, type, label, icon, tab, id, title, chapter, date, ownerId, createdAt}] }
 export async function loadNotifications({ limit = 20 } = {}) {
-  const userId = await uid();
-  if (!userId) return { count: 0, items: [] };
-  const lastRead = (await getLastReadAt()) || "1970-01-01T00:00:00Z";
-
-  const results = await Promise.all(
-    NOTIF_TABLES.map(async ({ table, ownerCol, type, label, icon, tab }) => {
-      const { data, error } = await supabase
-        .from(table)
-        .select("*")
-        .gt("created_at", lastRead)
-        .neq(ownerCol, userId)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      if (error) { console.warn(`[loadNotifications:${table}]`, error); return []; }
-      return (data || []).map(r => ({
-        table, type, label, icon, tab,
-        id: r.id,
-        title: r.content || r.note || r.file_name || r.subject || r.summary || label,
-        chapter: r.chapter || r.section || null,
-        date: r.date || r.upload_date || r.meeting_date || null,
-        ownerId: r[ownerCol],
-        createdAt: r.created_at,
-      }));
-    })
-  );
-
-  const items = results.flat().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, limit);
-  return { count: items.length, items };
+  const data = await apiGet(`/api/data/notifications?limit=${limit}`);
+  return data || { count: 0, items: [] };
 }
 
-
-// ==================== Phase 4: Access-control helpers ====================
-// Reads the caller's role from allowed_users. Returns:
-//   { role: 'researcher' | 'supervisor', enforced: true } — allowed
-//   { role: null, enforced: true }  — allow-list exists but this user is NOT listed → deny
-//   { role: null, enforced: false } — allowed_users table not deployed yet → do not lock (legacy)
+// ==================== Access-control helper ====================
+// Role now comes straight from the session cookie's users.role (NOT NULL by
+// schema, so every seeded account always has one) — no more separate
+// allow-list table/round-trip.
 export async function getMyRole() {
-  const userId = await uid();
-  if (!userId) return { role: null, enforced: false };
-  const { data, error } = await supabase
-    .from("allowed_users")
-    .select("role")
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) {
-    // Missing table (PGRST205) or similar infra error → treat as not-yet-enforced.
-    const code = error.code || "";
-    if (code === "PGRST205" || /not exist|relation .* does not exist/i.test(error.message || "")) {
-      console.info("[getMyRole] allow-list not deployed yet — access unrestricted.");
-      return { role: null, enforced: false };
-    }
-    console.warn("[getMyRole]", error);
-    return { role: null, enforced: false };
-  }
-  return { role: data?.role || null, enforced: true };
+  const user = await getSession();
+  return { role: user?.role || null, enforced: true };
 }
-

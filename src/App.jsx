@@ -5,7 +5,6 @@ import mammoth from "mammoth";
 import SupervisorRoom from "./SupervisorRoom";
 import NotificationBell from "./NotificationBell";
 import { loadPhase3a, syncChapters, syncUserDocs, syncDeletedBaseDocs, debounce, loadLibrary, syncLibrary, uploadLibraryFile, getLibraryFileUrl, deleteLibraryFile, insertLibraryRow, updateLibraryRow, deleteLibraryRow, deleteLibraryRows, loadBibliography, syncBibliography, loadCards, syncCards, loadTranslations, syncTranslations, loadCustomFormats, syncCustomFormats, getMyRole } from "./cloudSync";
-import { supabase } from "@/integrations/supabase/client";
 import { parseLibraryExcel, buildNotesWithRef, extractRefFromNotes } from "./lib/excelImport";
 
 // يستبدل أحرف التحكم الخام (0x00-0x1F) الموجودة داخل قيم السلاسل النصية لـ JSON
@@ -426,7 +425,7 @@ export default function App() {
   const [userRole, setUserRole] = useState(null); // 'researcher' | 'supervisor' | null
   const [accessDenied, setAccessDenied] = useState(false);
   useEffect(()=>{
-    supabase.auth.getUser().then(({data})=>setUserEmail(data?.user?.email||""));
+    fetch("/api/session").then(r=>r.json()).then(({user})=>setUserEmail(user?.email||"")).catch(()=>{});
     getMyRole().then(({ role, enforced }) => {
       setUserRole(role);
       // Only show the "access denied" banner once the allow-list is actually
@@ -442,7 +441,7 @@ export default function App() {
     setPage("supervisor");
   }, []);
   const handleLogout = useCallback(async ()=>{
-    try { await supabase.auth.signOut(); } catch(e){}
+    try { await fetch("/api/logout", { method: "POST" }); } catch(e){}
     window.location.href = "/auth";
   },[]);
   const [exportFormat, setExportFormat] = useState("Chicago");
@@ -1371,8 +1370,13 @@ ${JSON.stringify(thesisStructure, null, 2)}
       setLibUrlInput("");
       setLibUrlArchiveRefInput("");
       showNotif("✅ تمت إضافة المصدر من الرابط");
-    } catch {
-      showNotif("⚠️ تعذّر استخراج البيانات — حاول مرة أخرى", "error");
+    } catch (err) {
+      showNotif(
+        err?.isNetworkError
+          ? "🌐 خطأ شبكة — تأكد من الاتصال بالإنترنت"
+          : `⚠️ تعذّر استخراج البيانات: ${err?.message || err}`,
+        "error"
+      );
     }
     setLibUrlLoading(false);
   };
@@ -1949,8 +1953,13 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
         parsed.sourceType = "";
       }
       setEntityResult(parsed);
-    } catch (e) {
-      showNotif("⚠️ تعذّر استخراج التعريف — حاول مرة أخرى", "error");
+    } catch (err) {
+      showNotif(
+        err?.isNetworkError
+          ? "🌐 خطأ شبكة — تأكد من الاتصال بالإنترنت وحاول مجدداً"
+          : `⚠️ تعذّر استخراج التعريف: ${err?.message || err}`,
+        "error"
+      );
     }
     setEntityLoading(false);
   };
@@ -1992,8 +2001,12 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
       } catch {
         setTgResults({ error: text });
       }
-    } catch {
-      setTgResults({ error: "حدث خطأ في الاتصال" });
+    } catch (err) {
+      setTgResults({
+        error: err?.isNetworkError
+          ? "حدث خطأ شبكة — تأكد من الاتصال بالإنترنت"
+          : `تعذّر الاتصال بخدمة الذكاء الاصطناعي: ${err?.message || err}`,
+      });
     }
     setTgLoading(false);
   };
@@ -2060,7 +2073,9 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
 أجب بالعربية بأسلوب أكاديمي مختصر.` }]
         });
       setAiResult(data.content?.map(c=>c.text||"").join("") || "لم يُحصل على رد");
-    } catch { setAiResult("خطأ في الاتصال"); }
+    } catch (err) {
+      setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
+    }
     setAiLoading(false);
   };
 
@@ -2105,7 +2120,9 @@ ${docsCtx}
 اجعل الإجابة كثيفة معلوماتياً — كل سطر يحمل معلومة نافعة.` }]
         });
       setAiResult(data.content?.map(c=>c.text||"").join("") || "");
-    } catch { setAiResult("خطأ في الاتصال"); }
+    } catch (err) {
+      setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
+    }
     setAiLoading(false);
   };
 
@@ -2259,8 +2276,12 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
         });
       const text = data.content?.map(c => c.text || "").join("") || "لم يُحصل على رد";
       setCardAiResult(text);
-    } catch {
-      setCardAiResult("خطأ في الاتصال — تأكد من الإنترنت وحاول مجدداً");
+    } catch (err) {
+      setCardAiResult(
+        err?.isNetworkError
+          ? "خطأ شبكة — تأكد من الإنترنت وحاول مجدداً"
+          : `تعذّر الاتصال: ${err?.message || err}`
+      );
     }
     setCardAiLoading(false);
   };
@@ -2391,8 +2412,13 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
       setKeyPoints(parsed.keyPoints || []);
       setTranslatorDocMeta(parsed.docMeta || null);
       showNotif("✅ تم استخراج النص والترجمة");
-    } catch {
-      showNotif("فشل تحليل الصورة — حاول مرة أخرى", "error");
+    } catch (err) {
+      showNotif(
+        err?.isNetworkError
+          ? "🌐 خطأ شبكة — تأكد من الاتصال بالإنترنت"
+          : `فشل تحليل الصورة: ${err?.message || err}`,
+        "error"
+      );
     }
     setTranslatorLoading(false);
   };
@@ -2784,8 +2810,11 @@ ${docsContext}
         });
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ في بدء الجلسة.";
       setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
-    } catch {
-      setDefenseMessages([{ role: "committee", text: "تعذّر الاتصال بنظام المحاكاة — تأكد من الاتصال بالإنترنت.", ts: new Date().toLocaleTimeString("ar") }]);
+    } catch (err) {
+      const text = err?.isNetworkError
+        ? "تعذّر الاتصال بنظام المحاكاة — تأكد من الاتصال بالإنترنت."
+        : `تعذّر الاتصال بنظام المحاكاة: ${err?.message || err}`;
+      setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
     }
     setDefenseLoading(false);
   };
@@ -2818,8 +2847,11 @@ ${docsContext}
         });
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ.";
       setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
-    } catch {
-      setDefenseMessages(prev => [...prev, { role: "committee", text: "تعذّر الاتصال — حاول مرة أخرى.", ts: new Date().toLocaleTimeString("ar") }]);
+    } catch (err) {
+      const text = err?.isNetworkError
+        ? "تعذّر الاتصال — حاول مرة أخرى."
+        : `تعذّر الاتصال: ${err?.message || err}`;
+      setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
     }
     setDefenseLoading(false);
     setTimeout(() => defenseChatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
@@ -2893,8 +2925,13 @@ ${docsContext}
       const parsed = JSON.parse(clean);
       setThesWordResult(parsed);
       setThesWordHistory(prev => [{ word, result: parsed }, ...prev.filter(h => h.word !== word)].slice(0, 8));
-    } catch {
-      showNotif("حدث خطأ في الاتصال — حاول مجدداً", "error");
+    } catch (err) {
+      showNotif(
+        err?.isNetworkError
+          ? "حدث خطأ شبكة — حاول مجدداً"
+          : `تعذّر الاتصال: ${err?.message || err}`,
+        "error"
+      );
     }
     setThesWordLoading(false);
   };
@@ -2938,8 +2975,13 @@ ${docsContext}
       const parsed = JSON.parse(clean);
       setThesPhraseResult(parsed);
       setThesPhraseHistory(prev => [{ phrase, result: parsed }, ...prev.filter(h => h.phrase !== phrase)].slice(0, 6));
-    } catch {
-      showNotif("حدث خطأ في الاتصال — حاول مجدداً", "error");
+    } catch (err) {
+      showNotif(
+        err?.isNetworkError
+          ? "حدث خطأ شبكة — حاول مجدداً"
+          : `تعذّر الاتصال: ${err?.message || err}`,
+        "error"
+      );
     }
     setThesPhraseLoading(false);
   };
