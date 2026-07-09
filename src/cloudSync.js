@@ -209,6 +209,7 @@ function libToRow(s, userId) {
     key_points: Array.isArray(s.keyPoints) ? s.keyPoints : [],
     storage_path: s.storagePath ?? null,
     notes: s.notes ?? null,
+    archive_ref: s.archiveRef ?? null,
   };
 }
 
@@ -240,6 +241,7 @@ function rowToLib(r) {
     keyPoints: r.key_points || [],
     storagePath: r.storage_path || "",
     notes: r.notes || "",
+    archiveRef: r.archive_ref || "",
     sections: [],
   };
 }
@@ -370,6 +372,7 @@ export async function updateLibraryRow(clientId, changes) {
     subSectionId:"sub_section_id", priority:"priority", importantPages:"important_pages",
     summary:"summary", keywords:"keywords", whyImportant:"why_important", howToUse:"how_to_use",
     keyPoints:"key_points", storagePath:"storage_path", notes:"notes",
+    archiveRef:"archive_ref",
   };
   for (const k of Object.keys(changes)) {
     if (map[k]) patch[map[k]] = full[map[k]];
