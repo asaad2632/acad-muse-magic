@@ -13,6 +13,7 @@ export const Route = createFileRoute("/api/gemini-analyze")({
           const body = (await request.json()) as {
             prompt?: string;
             max_tokens?: number;
+            model?: string;
           };
           const prompt = (body.prompt || "").trim();
           if (!prompt) {
@@ -31,10 +32,12 @@ export const Route = createFileRoute("/api/gemini-analyze")({
           }
 
           // gemini-2.0-flash returns 429/quota-exhausted on some free-tier keys;
-          // gemini-2.5-flash is the model actually available. Its "thinking" mode
-          // consumes output tokens before the real answer, so it's disabled here
-          // to leave the whole budget for the JSON response.
-          const model = "gemini-2.5-flash";
+          // gemini-2.5-flash is the model actually available by default. Its
+          // "thinking" mode consumes output tokens before the real answer, so
+          // it's disabled here to leave the whole budget for the JSON response.
+          // Caller may override with gemini-2.5-flash-lite for a much higher
+          // free-tier quota at lower accuracy (see AI_MODELS in config.js).
+          const model = (body.model || "gemini-2.5-flash").trim();
           const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
           const payload = JSON.stringify({
             contents: [{ role: "user", parts: [{ text: prompt }] }],

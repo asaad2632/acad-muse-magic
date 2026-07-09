@@ -50,13 +50,13 @@ export async function analyzeDocumentLLM({ prompt, fileName, mimeType, base64, t
 // consumers) — proxied through /api/gemini-analyze, a standalone server route
 // with its own key (GEMINI_API_KEY), independent of the Groq/OpenRouter/Lovable
 // translation path.
-export async function analyzeHistoricalContext({ prompt, max_tokens = 2000 }) {
+export async function analyzeHistoricalContext({ prompt, max_tokens = 2000, model }) {
   let resp;
   try {
     resp = await fetch("/api/gemini-analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, max_tokens }),
+      body: JSON.stringify({ prompt, max_tokens, model }),
     });
   } catch (err) {
     console.error("[analyzeHistoricalContext] network error", err);

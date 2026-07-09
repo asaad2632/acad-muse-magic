@@ -2577,7 +2577,8 @@ ${textToAnalyze.substring(0, 4000)}
 
     let raw = "";
     try {
-      const data = await analyzeHistoricalContext({ prompt, max_tokens: 6000 });
+      const geminiModel = aiModel.startsWith("gemini/") ? aiModel.replace(/^gemini\//, "") : "gemini-2.5-flash";
+      const data = await analyzeHistoricalContext({ prompt, max_tokens: 6000, model: geminiModel });
       raw = data.content?.map(c => c.text || "").join("") || "{}";
     } catch (err) {
       setHistoricalAnalysisError(
