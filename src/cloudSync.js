@@ -180,7 +180,45 @@ export function debounce(fn, ms = 600) {
 
 // ==================== Phase 3b: library_sources + Storage ====================
 
-const BUCKET = "thesis-files";
+// File bytes live in DigitalOcean Spaces, proxied through /api/spaces-storage
+// (see src/routes/api/spaces-storage.ts + src/spacesStorage.js) so the Spaces
+// secret key never reaches the client. Supabase Auth still gates access: the
+// session's access_token is sent as a Bearer header, and the server derives
+// the storage key/ownership from it — callers here never see or set userId.
+async function spacesAuthHeader() {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : null;
+}
+
+async function uploadToSpaces(file) {
+  const headers = await spacesAuthHeader();
+  if (!headers || !file) return null;
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/spaces-storage", { method: "POST", headers, body: form });
+  if (!res.ok) { console.warn("[uploadToSpaces]", res.status, await res.text().catch(() => "")); return null; }
+  const data = await res.json();
+  return data?.storagePath || null;
+}
+
+async function getSpacesFileUrl(path) {
+  if (!path) return null;
+  const headers = await spacesAuthHeader();
+  if (!headers) return null;
+  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`, { headers });
+  if (!res.ok) { console.warn("[getSpacesFileUrl]", res.status, await res.text().catch(() => "")); return null; }
+  const data = await res.json();
+  return data?.signedUrl || null;
+}
+
+async function deleteFromSpaces(path) {
+  if (!path) return;
+  const headers = await spacesAuthHeader();
+  if (!headers) return;
+  const res = await fetch(`/api/spaces-storage?path=${encodeURIComponent(path)}`, { method: "DELETE", headers });
+  if (!res.ok) console.warn("[deleteFromSpaces]", res.status, await res.text().catch(() => ""));
+}
 
 function libToRow(s, userId) {
   return {
@@ -246,30 +284,17 @@ function rowToLib(r) {
   };
 }
 
-// Upload a File to thesis-files bucket. Returns storage_path or null.
+// Upload a File to Spaces via /api/spaces-storage. Returns storage_path or null.
 export async function uploadLibraryFile(file) {
-  const userId = await uid();
-  if (!userId || !file) return null;
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-  const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || undefined,
-    upsert: false,
-  });
-  if (error) { console.warn("[uploadLibraryFile]", error); return null; }
-  return path;
+  return uploadToSpaces(file);
 }
 
 export async function getLibraryFileUrl(path) {
-  if (!path) return null;
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
-  if (error) { console.warn("[getLibraryFileUrl]", error); return null; }
-  return data?.signedUrl || null;
+  return getSpacesFileUrl(path);
 }
 
 export async function deleteLibraryFile(path) {
-  if (!path) return;
-  await supabase.storage.from(BUCKET).remove([path]);
+  return deleteFromSpaces(path);
 }
 
 export async function loadLibrary() {
@@ -690,25 +715,13 @@ export async function syncSupervisorFiles(arr) {
   await syncSupervisorTable("supervisor_files", arr.map(f => fToRow(f, userId)), "uploaded_by");
 }
 export async function uploadSupervisorFile(file) {
-  const userId = await uid();
-  if (!userId || !file) return null;
-  const ext = (file.name.split(".").pop() || "bin").toLowerCase();
-  const path = `${userId}/supervisor/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
-    contentType: file.type || undefined, upsert: false,
-  });
-  if (error) { console.warn("[uploadSupervisorFile]", error); return null; }
-  return path;
+  return uploadToSpaces(file);
 }
 export async function getSupervisorFileUrl(path) {
-  if (!path) return null;
-  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
-  if (error) { console.warn("[getSupervisorFileUrl]", error); return null; }
-  return data?.signedUrl || null;
+  return getSpacesFileUrl(path);
 }
 export async function deleteSupervisorFile(path) {
-  if (!path) return;
-  await supabase.storage.from(BUCKET).remove([path]);
+  return deleteFromSpaces(path);
 }
 
 // ----- notes -----

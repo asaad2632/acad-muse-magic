@@ -13,6 +13,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as ApiSpacesStorageRouteImport } from './routes/api/spaces-storage'
 import { Route as ApiGeminiAnalyzeRouteImport } from './routes/api/gemini-analyze'
 import { Route as ApiAiChatRouteImport } from './routes/api/ai-chat'
 
@@ -35,6 +36,11 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiSpacesStorageRoute = ApiSpacesStorageRouteImport.update({
+  id: '/api/spaces-storage',
+  path: '/api/spaces-storage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiGeminiAnalyzeRoute = ApiGeminiAnalyzeRouteImport.update({
   id: '/api/gemini-analyze',
   path: '/api/gemini-analyze',
@@ -52,12 +58,14 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/spaces-storage': typeof ApiSpacesStorageRoute
 }
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/spaces-storage': typeof ApiSpacesStorageRoute
   '/': typeof AuthenticatedIndexRoute
 }
 export interface FileRoutesById {
@@ -67,14 +75,26 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/api/ai-chat': typeof ApiAiChatRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
+  '/api/spaces-storage': typeof ApiSpacesStorageRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/auth' | '/reset-password' | '/api/ai-chat' | '/api/gemini-analyze'
+    | '/'
+    | '/auth'
+    | '/reset-password'
+    | '/api/ai-chat'
+    | '/api/gemini-analyze'
+    | '/api/spaces-storage'
   fileRoutesByTo: FileRoutesByTo
-  to: '/auth' | '/reset-password' | '/api/ai-chat' | '/api/gemini-analyze' | '/'
+  to:
+    | '/auth'
+    | '/reset-password'
+    | '/api/ai-chat'
+    | '/api/gemini-analyze'
+    | '/api/spaces-storage'
+    | '/'
   id:
     | '__root__'
     | '/_authenticated'
@@ -82,6 +102,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/api/ai-chat'
     | '/api/gemini-analyze'
+    | '/api/spaces-storage'
     | '/_authenticated/'
   fileRoutesById: FileRoutesById
 }
@@ -91,6 +112,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   ApiAiChatRoute: typeof ApiAiChatRoute
   ApiGeminiAnalyzeRoute: typeof ApiGeminiAnalyzeRoute
+  ApiSpacesStorageRoute: typeof ApiSpacesStorageRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -122,6 +144,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/spaces-storage': {
+      id: '/api/spaces-storage'
+      path: '/api/spaces-storage'
+      fullPath: '/api/spaces-storage'
+      preLoaderRoute: typeof ApiSpacesStorageRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/gemini-analyze': {
       id: '/api/gemini-analyze'
@@ -157,7 +186,18 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   ApiAiChatRoute: ApiAiChatRoute,
   ApiGeminiAnalyzeRoute: ApiGeminiAnalyzeRoute,
+  ApiSpacesStorageRoute: ApiSpacesStorageRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
