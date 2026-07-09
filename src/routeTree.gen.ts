@@ -72,11 +72,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/auth'
-    | '/reset-password'
-    | '/api/ai-chat'
-    | '/api/gemini-analyze'
+    '/' | '/auth' | '/reset-password' | '/api/ai-chat' | '/api/gemini-analyze'
   fileRoutesByTo: FileRoutesByTo
   to: '/auth' | '/reset-password' | '/api/ai-chat' | '/api/gemini-analyze' | '/'
   id:
