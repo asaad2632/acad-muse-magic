@@ -720,6 +720,7 @@ export type Database = {
           key_points: Json | null
           original_text: string | null
           saved_at: string | null
+          source: string
           translation: string | null
           updated_at: string
           user_id: string | null
@@ -733,6 +734,7 @@ export type Database = {
           key_points?: Json | null
           original_text?: string | null
           saved_at?: string | null
+          source?: string
           translation?: string | null
           updated_at?: string
           user_id?: string | null
@@ -746,6 +748,7 @@ export type Database = {
           key_points?: Json | null
           original_text?: string | null
           saved_at?: string | null
+          source?: string
           translation?: string | null
           updated_at?: string
           user_id?: string | null
