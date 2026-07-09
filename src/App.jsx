@@ -2340,7 +2340,7 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
         content.push({ type: "image_url", image_url: { url } });
       }
       const data = await callLLM({
-        forceProvider: "lovable",
+        forceProvider: "gemini",
         max_tokens: 3000,
         messages: [{ role: "user", content }],
       });

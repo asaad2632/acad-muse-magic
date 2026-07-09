@@ -21,13 +21,28 @@ function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal 
 // Gemini's generateContent API has its own shape: no "system" role inside the
 // turn list (it's a separate top-level systemInstruction), and the assistant
 // role is called "model" rather than "assistant".
+function toGeminiPart(item: unknown): { text?: string; inlineData?: { mimeType: string; data: string } } {
+  if (item && typeof item === "object" && (item as { type?: string }).type === "image_url") {
+    const url: string = (item as { image_url?: { url?: string } }).image_url?.url || "";
+    const match = /^data:([^;]+);base64,(.+)$/.exec(url);
+    if (match) return { inlineData: { mimeType: match[1], data: match[2] } };
+    return { text: "" };
+  }
+  if (item && typeof item === "object" && (item as { type?: string }).type === "text") {
+    return { text: (item as { text?: string }).text || "" };
+  }
+  return { text: JSON.stringify(item) };
+}
+
 function toGeminiContents(messages: ChatMsg[]) {
   return (messages || [])
     .filter((m) => m.role !== "system")
     .map((m) => {
       const role = m.role === "assistant" ? "model" : "user";
-      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      return { role, parts: [{ text }] };
+      const parts = Array.isArray(m.content)
+        ? m.content.map(toGeminiPart)
+        : [{ text: typeof m.content === "string" ? m.content : JSON.stringify(m.content) }];
+      return { role, parts };
     });
 }
 
@@ -60,7 +75,9 @@ export const Route = createFileRoute("/api/ai-chat")({
           const model =
             body.forceProvider === "lovable" && !requestedModel.startsWith("google/")
               ? "google/gemini-2.5-flash"
-              : requestedModel;
+              : body.forceProvider === "gemini" && !requestedModel.startsWith("gemini/")
+                ? "gemini/gemini-2.5-flash"
+                : requestedModel;
 
           let endpoint: string;
           let headers: Record<string, string>;
