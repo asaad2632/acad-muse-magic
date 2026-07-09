@@ -497,6 +497,28 @@ export default function App() {
   const [editingChapter, setEditingChapter]   = useState(null); // { id, field:"titleAr", value }
   const [editingSection, setEditingSection]   = useState(null); // { chId, secId, value }
 
+  // Accordion state for "هيكل الأطروحة" — collapsed by default; each level
+  // (chapter / section) tracked independently so opening one doesn't affect
+  // sibling chapters or other sections.
+  const [expandedChapters, setExpandedChapters] = useState(() => new Set());
+  const [expandedSections, setExpandedSections] = useState(() => new Set());
+  const sectionKey = (chId, secId) => `${chId}:${secId}`;
+  const toggleChapterOpen = (chId) => setExpandedChapters(prev => {
+    const next = new Set(prev);
+    if (next.has(chId)) next.delete(chId); else next.add(chId);
+    return next;
+  });
+  const toggleSectionOpen = (chId, secId) => setExpandedSections(prev => {
+    const key = sectionKey(chId, secId);
+    const next = new Set(prev);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    return next;
+  });
+  // While searching, force everything open so matches are visible without
+  // extra clicks; otherwise reflect the explicit expand/collapse state.
+  const isChapterOpen = (chId) => structureSearch.trim() ? true : expandedChapters.has(chId);
+  const isSectionOpen = (chId, secId) => structureSearch.trim() ? true : expandedSections.has(sectionKey(chId, secId));
+
   const saveChapters = (updated) => {
     setChapters(updated);
     try { localStorage.setItem("acadarchiv_chapters", JSON.stringify(updated)); } catch {}
@@ -632,6 +654,7 @@ export default function App() {
     setAddingSecChId(chId);
     setNewSecForm({ title: "", num: String(mainSecs.length + 1) });
     setAddingSubSecId(null);
+    setExpandedChapters(prev => new Set(prev).add(chId));
   };
 
   const submitAddSection = (chId) => {
@@ -652,10 +675,11 @@ export default function App() {
     showNotif("✅ تم إضافة المبحث");
   };
 
-  const openAddSubSection = (secId) => {
+  const openAddSubSection = (chId, secId) => {
     setAddingSubSecId(secId);
     setNewSubForm({ title: "" });
     setAddingSecChId(null);
+    setExpandedSections(prev => new Set(prev).add(sectionKey(chId, secId)));
   };
 
   const submitAddSubSection = (chId, secId) => {
@@ -3322,9 +3346,12 @@ ${docsContext}
                       </div>
                     ) : (
                       // وضع العرض
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                      <div onClick={()=>toggleChapterOpen(ch.id)} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,cursor:"pointer"}}>
                         <div style={{flex:1}}>
-                          <div style={{fontWeight:700,fontSize:14,color:ch.color,marginBottom:4}}>{ch.titleAr}</div>
+                          <div style={{fontWeight:700,fontSize:14,color:ch.color,marginBottom:4,display:"flex",alignItems:"center",gap:6}}>
+                            <span style={{fontSize:11}}>{isChapterOpen(ch.id) ? "▼" : "▶"}</span>
+                            {ch.titleAr}
+                          </div>
                           <div style={{display:"flex",gap:8,fontSize:11,color:"#64748b"}}>
                             <span>📄 {chDocs.length} وثيقة</span>
                             <span>⭐ {chDocs.filter(d=>d.priority==="★★★").length} عالية الأولوية</span>
@@ -3333,17 +3360,17 @@ ${docsContext}
                         </div>
                         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                           <button
-                            onClick={()=>setEditingChapter({id:ch.id,value:ch.titleAr})}
+                            onClick={e=>{e.stopPropagation();setEditingChapter({id:ch.id,value:ch.titleAr});}}
                             style={{padding:"4px 10px",borderRadius:6,background:"white",border:`1px solid ${ch.color}`,color:ch.color,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                             ✏️ تعديل
                           </button>
                           <button
-                            onClick={()=>openAddSection(ch.id)}
+                            onClick={e=>{e.stopPropagation();openAddSection(ch.id);}}
                             style={{padding:"4px 10px",borderRadius:6,background:"white",border:`1px solid ${ch.color}`,color:ch.color,cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                             ＋ مبحث
                           </button>
                           <button
-                            onClick={()=>{setSearchFilters(p=>({...p,chapterId:ch.id.toString(),query:""}));setPage("search");}}
+                            onClick={e=>{e.stopPropagation();setSearchFilters(p=>({...p,chapterId:ch.id.toString(),query:""}));setPage("search");}}
                             style={{padding:"4px 10px",borderRadius:6,background:ch.color,color:"white",border:"none",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                             عرض الوثائق
                           </button>
@@ -3352,6 +3379,7 @@ ${docsContext}
                     )}
                   </div>
 
+                  {isChapterOpen(ch.id) && (<>
                   {/* ===== نموذج إضافة مبحث جديد ===== */}
                   {addingSecChId === ch.id && (
                     <div style={{padding:"12px 18px",background:`${ch.color}05`,borderBottom:`0.5px solid ${ch.color}20`,display:"grid",gap:8}}>
@@ -3386,7 +3414,9 @@ ${docsContext}
                         <div key={sec.id} style={{marginBottom:16,paddingBottom:16,borderBottom:"0.5px solid #f1f5f9"}}>
 
                           {/* عنوان المبحث مع زر التعديل */}
-                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:8}}>
+                          <div
+                            onClick={()=>{ if(!isEditingThisSec) toggleSectionOpen(ch.id, sec.id); }}
+                            style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8,gap:8,cursor:"pointer"}}>
                             {isEditingThisSec ? (
                               <div style={{display:"flex",gap:6,alignItems:"center",flex:1}}>
                                 <input
@@ -3401,6 +3431,7 @@ ${docsContext}
                               </div>
                             ) : (
                               <div style={{display:"flex",alignItems:"center",gap:6,flex:1,flexWrap:"wrap"}}>
+                                <span style={{fontSize:10,color:ch.color,flexShrink:0}}>{isSectionOpen(ch.id, sec.id) ? "▼" : "▶"}</span>
                                 <div style={{fontWeight:600,fontSize:13,color:"#1e293b",flex:1,minWidth:140}}>{sec.title}</div>
                                 <button
                                   onClick={e=>{e.stopPropagation();setEditingSection({chId:ch.id,secId:sec.id,value:sec.title});}}
@@ -3408,7 +3439,7 @@ ${docsContext}
                                   ✏️
                                 </button>
                                 <button
-                                  onClick={e=>{e.stopPropagation();openAddSubSection(sec.id);}}
+                                  onClick={e=>{e.stopPropagation();openAddSubSection(ch.id, sec.id);}}
                                   title="إضافة فقرة فرعية"
                                   style={{padding:"2px 8px",borderRadius:5,background:"transparent",border:`0.5px solid ${ch.color}`,color:ch.color,cursor:"pointer",fontSize:10,fontFamily:"inherit",flexShrink:0}}>
                                   ＋ فقرة
@@ -3426,6 +3457,7 @@ ${docsContext}
                             <span style={{background:`${ch.color}15`,color:ch.color,borderRadius:5,padding:"1px 8px",fontSize:10,fontWeight:600,flexShrink:0}}>{secDocs.length} وثيقة</span>
                           </div>
 
+                          {isSectionOpen(ch.id, sec.id) && (<>
                           {/* العناصر الفرعية */}
                           {subSections.length>0 && (
                             <div style={{marginBottom:8,paddingRight:8,borderRight:`2px solid ${ch.color}30`}}>
@@ -3502,6 +3534,7 @@ ${docsContext}
                               ⚠️ لا توجد وثائق مرتبطة بهذا المبحث بعد — أضف مصادر من مكتبتك أو ابحث في QDL
                             </div>
                           )}
+                          </>)}
                         </div>
                       );
                     })}
@@ -3533,6 +3566,7 @@ ${docsContext}
                       );
                     })()}
                   </div>
+                  </>)}
 
                 </div>
               );
