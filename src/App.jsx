@@ -78,6 +78,16 @@ function aiErrorMessage(err) {
   return `تعذّر الاتصال: ${err?.message || err}`;
 }
 
+// Short, user-facing reason for a failed document analysis — shown next to
+// the "فشل التحليل" retry badge in the library list.
+function shortFailureReason(err) {
+  if (err?.isTokenLimitError) return "النص طويل جداً";
+  if (err?.isNetworkError) return "خطأ بالشبكة";
+  const msg = String(err?.message || err || "");
+  if (/429|quota|rate.?limit|RESOURCE_EXHAUSTED/i.test(msg)) return "تجاوز الحصة";
+  return "خطأ غير معروف";
+}
+
 // ============================================================
 // بيانات الفصول والمباحث — مستخرجة من خطة السمنار
 // الخليج العربي في سنوات الحرب العالمية الثانية 1939-1945
@@ -1010,6 +1020,7 @@ export default function App() {
   }, [pendingLibIds, retryPendingLibrary]);
   const [libUploading, setLibUploading] = useState(false);
   const [libAnalyzing, setLibAnalyzing] = useState(null); // id المصدر الجاري تحليله
+  const [retryingLibIds, setRetryingLibIds] = useState(() => new Set()); // ids قيد إعادة التحليل (لتمييز نص "جارٍ إعادة التحليل..." عن التحليل الأول)
   const [libFilter, setLibFilter] = useState({ query:"", chapterId:"", category:"", priority:"" });
   // Multi-select for bulk-delete in the Library page. Stores client-side ids
   // as strings so it survives across type changes (Excel imports use numeric
@@ -1170,7 +1181,10 @@ ${JSON.stringify(thesisStructure, null, 2)}
       return reconcileClassification(parsed);
     } catch (err) {
       console.error("[analyzeSource]", err);
-      return null;
+      // No title/summary/chapterId here, so callers' success check still
+      // correctly treats this as a failure — analysisFailReason just adds a
+      // short user-facing explanation for the retry badge.
+      return { analysisFailReason: shortFailureReason(err) };
     } finally {
       setLibAnalyzing(null);
     }
@@ -1340,8 +1354,8 @@ ${JSON.stringify(thesisStructure, null, 2)}
 
       const analysis = await analyzeSource(newSrc, payload);
       const analyzed = analysis && (analysis.title || analysis.summary || analysis.chapterId)
-        ? { ...newSrc, ...analysis, analyzed: true, status: "تم التحليل ✅" }
-        : { ...newSrc, analyzed: false, status: "فشل التحليل ⚠️ — عدّل يدوياً" };
+        ? { ...newSrc, ...analysis, analyzed: true, status: "تم التحليل ✅", analysisFailReason: "" }
+        : { ...newSrc, analyzed: false, status: "فشل التحليل ⚠️ — عدّل يدوياً", analysisFailReason: analysis?.analysisFailReason || "" };
       updateLibrary(prev => prev.map(s => s.id === srcId ? analyzed : s));
       // Upsert the analyzed version too so title/summary/keywords are stored.
       const { error: insErr2, errorType: insErrType2 } = await insertLibraryRow(analyzed);
@@ -1358,6 +1372,66 @@ ${JSON.stringify(thesisStructure, null, 2)}
     showNotif("✅ اكتمل رفع وتحليل الملفات");
   };
 
+  // Retries analysis for a single already-uploaded source (triggered by the
+  // "⚠️ فشل التحليل" badge in the library list) — same analyzeSource() call,
+  // same LLM/provider fallback logic, as the original upload path.
+  // library_sources has no column for the extracted text, so `fileData` only
+  // survives in memory for the current session — a source loaded fresh from
+  // the DB (e.g. after a reload) won't have it. In that case, re-fetch the
+  // original file from storage and re-run the exact same extraction path
+  // handleLibFileUpload uses, instead of degrading to a filename-only retry.
+  const retryLibAnalysis = async (srcId) => {
+    const src = library.find(s => String(s.id) === String(srcId));
+    if (!src) return;
+    setRetryingLibIds(prev => new Set([...prev, String(srcId)]));
+
+    let payload;
+    if (src.fileData) {
+      payload = { text: src.fileData };
+    } else if (src.storagePath) {
+      try {
+        const url = await getLibraryFileUrl(src.storagePath);
+        const blob = await (await fetch(url)).blob();
+        const ext = (src.fileType || "").toLowerCase();
+        const IMG_EXT = ["jpg","jpeg","png","webp","gif","tif","tiff","bmp","heic"];
+        if (ext === "pdf") {
+          const file = new File([blob], src.fileName || "file.pdf", { type: "application/pdf" });
+          const { text: pdfText } = await extractPdfPages(file);
+          payload = pdfText && pdfText.length >= 100
+            ? { text: pdfText }
+            : { text: `(ملف PDF ممسوح ضوئياً — لا يوجد نص قابل للاستخراج)\nاسم الملف: ${src.fileName}` };
+        } else if (IMG_EXT.includes(ext)) {
+          const base64 = await readFileAsBase64(blob);
+          payload = { base64, mimeType: blob.type || `image/${ext === "jpg" ? "jpeg" : ext}` };
+        } else if (ext === "docx") {
+          const { value } = await mammoth.extractRawText({ arrayBuffer: await blob.arrayBuffer() });
+          payload = { text: value || "" };
+        } else {
+          payload = { text: await blob.text() };
+        }
+      } catch (err) {
+        console.error("[retryLibAnalysis-refetch]", err);
+        payload = { text: `اسم الملف: ${src.fileName}` };
+      }
+    } else {
+      payload = { text: `اسم الملف: ${src.fileName}` };
+    }
+
+    const analysis = await analyzeSource(src, payload);
+    const updated = analysis && (analysis.title || analysis.summary || analysis.chapterId)
+      ? { ...src, ...analysis, analyzed: true, status: "تم التحليل ✅", analysisFailReason: "" }
+      : { ...src, analyzed: false, status: "فشل التحليل ⚠️ — عدّل يدوياً", analysisFailReason: analysis?.analysisFailReason || "" };
+    updateLibrary(prev => prev.map(s => s.id === src.id ? updated : s));
+    setRetryingLibIds(prev => { const n = new Set(prev); n.delete(String(srcId)); return n; });
+
+    const { error: insErr, errorType: insErrType } = await insertLibraryRow(updated);
+    if (insErr) {
+      setPendingLibIds(prev => new Set([...prev, String(updated.id)]));
+      showLibDiagIfNeeded(insErrType);
+    } else {
+      setPendingLibIds(prev => { const n = new Set(prev); n.delete(String(updated.id)); return n; });
+    }
+  };
 
   const handleLibUrlImport = async () => {
     if (!libUrlInput.trim()) return;
@@ -4580,6 +4654,7 @@ ${docsContext}
                 {filteredLib.map(src=>{
                   const ch = CHAPTERS_DATA.find(c=>c.id===src.chapterId);
                   const isAnalyzing = libAnalyzing === src.id;
+                  const isRetryingAnalysis = retryingLibIds.has(String(src.id));
                   return (
                     <div key={src.id} style={{background:"white",borderRadius:12,border:`0.5px solid ${libSelected?.id===src.id?"#3B82F6":"#e2e8f0"}`,overflow:"hidden"}}>
                       {/* رأس البطاقة */}
@@ -4612,9 +4687,26 @@ ${docsContext}
                           <div style={{display:"flex",gap:6,marginTop:4,flexWrap:"wrap"}}>
                             {src.priority && <span style={{background:src.priority==="★★★"?"#dcfce7":src.priority==="★★"?"#fef9c3":"#f1f5f9",color:src.priority==="★★★"?"#16a34a":src.priority==="★★"?"#ca8a04":"#94a3b8",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700}}>{src.priority}</span>}
                             {ch && <span style={{background:`${ch.color}15`,color:ch.color,borderRadius:4,padding:"1px 6px",fontSize:10}}>ف{src.chapterId}: {ch.titleAr.split(":")[0]}</span>}
-                            <span style={{background:src.analyzed?"#f0fdf4":"#fff7ed",color:src.analyzed?"#16a34a":"#f59e0b",borderRadius:4,padding:"1px 6px",fontSize:10}}>
-                              {isAnalyzing?"⏳ جاري التحليل...":src.status}
-                            </span>
+                            {isAnalyzing ? (
+                              <span style={{background:"#fff7ed",color:"#f59e0b",borderRadius:4,padding:"1px 6px",fontSize:10}}>
+                                {isRetryingAnalysis ? "⏳ جارٍ إعادة التحليل..." : "⏳ جاري التحليل..."}
+                              </span>
+                            ) : !src.analyzed && src.status?.startsWith("فشل التحليل") ? (
+                              <>
+                                <button
+                                  onClick={e=>{e.stopPropagation();retryLibAnalysis(src.id);}}
+                                  data-testid={`lib-retry-analysis-${src.id}`}
+                                  title={src.analysisFailReason ? `سبب الفشل: ${src.analysisFailReason} — اضغط لإعادة المحاولة` : "اضغط لإعادة محاولة التحليل"}
+                                  style={{background:"#fff7ed",color:"#f59e0b",borderRadius:4,padding:"1px 6px",fontSize:10,border:"none",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}>
+                                  ⚠️ فشل التحليل{src.analysisFailReason ? ` (${src.analysisFailReason})` : ""} — إعادة المحاولة
+                                </button>
+                                <span style={{color:"#94a3b8",fontSize:10}}>أو عدّل يدوياً</span>
+                              </>
+                            ) : (
+                              <span style={{background:"#f0fdf4",color:"#16a34a",borderRadius:4,padding:"1px 6px",fontSize:10}}>
+                                {src.status}
+                              </span>
+                            )}
                             {pendingLibIds.has(String(src.id)) && (
                               <span data-testid="library-pending-badge" title="لم يُحفظ في السحابة بعد — ستُعاد المحاولة تلقائياً"
                                 style={{background:"#fef3c7",color:"#b45309",borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:700,border:"1px solid #fde68a"}}>
