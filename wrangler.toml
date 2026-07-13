@@ -3,8 +3,7 @@ compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 pages_build_output_dir = "dist"
 
-[vars]
-SUPABASE_URL = "https://cbkxcbgtklmuubncaate.supabase.co"
-SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNia3hjYmd0a2xtdXVibmNhYXRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MDE5OTMsImV4cCI6MjA5ODQ3Nzk5M30.VO4-b3VcksRE00gK2lwmIM6dnstK3J0JLAcGPG7mR8g"
-VITE_SUPABASE_URL = "https://cbkxcbgtklmuubncaate.supabase.co"
-VITE_SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNia3hjYmd0a2xtdXVibmNhYXRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI5MDE5OTMsImV4cCI6MjA5ODQ3Nzk5M30.VO4-b3VcksRE00gK2lwmIM6dnstK3J0JLAcGPG7mR8g"
+# Real secrets/env vars (DATABASE_URL, R2_*, GROQ_API_KEY, etc.) are set via
+# the Cloudflare Pages dashboard (Settings -> Environment variables), never
+# committed here. This file only carries build/runtime settings Cloudflare
+# needs before running the build command.
