@@ -2362,6 +2362,7 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
   const [translatorFile, setTranslatorFile]           = useState(null);
   const [translatorFileName, setTranslatorFileName]   = useState("");
   const [translatedResult, setTranslatedResult]       = useState("");
+  const [translatedResultProvider, setTranslatedResultProvider] = useState("");
   const [keyPoints, setKeyPoints]                     = useState([]);
   const [translatorLoading, setTranslatorLoading]     = useState(false);
   const [translatorLang, setTranslatorLang]           = useState("إنجليزية");
@@ -2531,11 +2532,18 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
     }
   };
 
-  const runTranslation = async () => {
+  // Shared implementation behind the translator's "ترجم بـ Groq" and "ترجم
+  // بـ Cerebras" buttons — same prompt/JSON schema, only the forced model
+  // (and therefore provider) differs. Both are fixed models, fully
+  // independent of the general AI_MODELS dropdown (the Gemini-button sibling
+  // below is the only other exception — every other AI feature in the app
+  // follows the dropdown).
+  const runPlainTranslation = async (model, maxTokens) => {
     const textToTranslate = translatorText.trim();
     if (!textToTranslate) { showNotif("أدخل أو ألصق النص الأجنبي أولاً", "error"); return; }
     setTranslatorLoading(true);
     setTranslatedResult("");
+    setTranslatedResultProvider("");
     setKeyPoints([]);
     setTranslatorDocMeta(null);
 
@@ -2570,20 +2578,16 @@ ${textToTranslate.substring(0, 4000)}
 
     let raw = "";
     try {
-      // Fixed to Groq — this button is intentionally independent of the
-      // general AI_MODELS dropdown (its Gemini-button sibling below is the
-      // only other exception; every other AI feature follows the dropdown).
-      const data = await callLLM({
-          model: "groq/llama-3.3-70b-versatile",
-          max_tokens: 4000,
-          messages: [{ role: "user", content: prompt }]
-        });
+      const data = await callLLM({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] });
       raw = data.content?.map(c => c.text || "").join("") || "{}";
+      setTranslatedResultProvider(data.provider || "");
     } catch (err) {
       setTranslatedResult(
-        err?.isNetworkError
-          ? "حدث خطأ في الترجمة — تأكد من الاتصال بالإنترنت"
-          : `تعذّر الاتصال بخدمة الترجمة: ${err?.message || err}`
+        err?.isTokenLimitError
+          ? err.message
+          : err?.isNetworkError
+            ? "حدث خطأ في الترجمة — تأكد من الاتصال بالإنترنت"
+            : `تعذّر الاتصال بخدمة الترجمة: ${err?.message || err}`
       );
       setKeyPoints([]);
       setTranslatorLoading(false);
@@ -2597,11 +2601,17 @@ ${textToTranslate.substring(0, 4000)}
       setKeyPoints(parsed.keyPoints || []);
       setTranslatorDocMeta(parsed.docMeta || null);
     } catch (err) {
-      console.error("[runTranslation] فشل تحليل رد الذكاء الاصطناعي. الرد الخام:", raw, err);
+      console.error("[runPlainTranslation] فشل تحليل رد الذكاء الاصطناعي. الرد الخام:", raw, err);
       setTranslatedResult("فشل تحليل رد الذكاء الاصطناعي — حاول مرة أخرى أو قصّر النص");
       setKeyPoints([]);
     }
     setTranslatorLoading(false);
+  };
+
+  const runTranslation = () => runPlainTranslation("groq/llama-3.3-70b-versatile", 4000);
+  // Cerebras' free-tier context is small (~8K tokens total) — a lower
+  // max_tokens leaves more headroom before hitting that ceiling.
+  const runCerebrasTranslation = () => runPlainTranslation("cerebras/gemma-4-31b", 2000);
   };
 
   // مسار مستقل تماماً عن ترجمة Groq (runTranslation أعلاه): يأخذ النص الأجنبي
@@ -5146,6 +5156,14 @@ ${docsContext}
                     style={{width:"100%",padding:"10px",borderRadius:8,marginTop:8,background:historicalAnalysisLoading||!translatorText.trim()?"#94a3b8":"#92400E",color:"white",border:"none",cursor:historicalAnalysisLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
                     {historicalAnalysisLoading ? "⏳ جاري الترجمة والتحليل التاريخي..." : "🏛️ ترجمة وتحليل تاريخي (Gemini)"}
                   </button>
+
+                  {/* زر الترجمة عبر Cerebras — مستقل تماماً، بدون أي fallback */}
+                  <button
+                    onClick={runCerebrasTranslation}
+                    disabled={translatorLoading || !translatorText.trim()}
+                    style={{width:"100%",padding:"10px",borderRadius:8,marginTop:8,background:translatorLoading||!translatorText.trim()?"#94a3b8":"#0F766E",color:"white",border:"none",cursor:translatorLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
+                    {translatorLoading ? "⏳ جاري الترجمة والتحليل..." : "⚡ ترجم بـ Cerebras"}
+                  </button>
                 </div>
 
                 {/* ===== بيانات الوثيقة المستنتجة ===== */}
@@ -5212,6 +5230,7 @@ ${docsContext}
                     </div>
                     <div style={{padding:16,maxHeight:320,overflowY:"auto"}}>
                       <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{translatedResult}</p>
+                      {translatedResultProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تمت الترجمة بواسطة {providerLabel(translatedResultProvider)}</div>}
                     </div>
                   </div>
                 )}

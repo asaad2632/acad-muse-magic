@@ -7,6 +7,11 @@ function estimateTokens(text) {
   return Math.ceil((text || "").length / 3);
 }
 const CEREBRAS_TOKEN_WARNING_THRESHOLD = 6000;
+const CEREBRAS_CONTEXT_LIMIT_MSG = "النص طويل جداً لهذا النموذج، جرّب موديل آخر من القائمة أو قسّم النص";
+// Cerebras (OpenAI-compatible) reports overflow as an invalid_request_error
+// whose message/code mentions context length — matched loosely since the
+// exact wording isn't guaranteed to stay stable.
+const CONTEXT_LIMIT_ERROR_RE = /context.?length|context_length_exceeded|maximum context|too many tokens/i;
 
 // Unified AI call. Proxied through /api/ai-chat (Lovable AI Gateway server-side).
 // Returns Anthropic-shaped: { content: [{ type: "text", text: "..." }], provider }
@@ -28,7 +33,7 @@ export async function callLLM({ system, messages = [], max_tokens = 1024, forceP
       .filter(Boolean)
       .join("\n");
     if (estimateTokens(combined) > CEREBRAS_TOKEN_WARNING_THRESHOLD) {
-      const limitErr = new Error("النص طويل جداً لهذا النموذج، جرّب موديل آخر من القائمة أو قسّم النص");
+      const limitErr = new Error(CEREBRAS_CONTEXT_LIMIT_MSG);
       limitErr.isNetworkError = false;
       limitErr.isTokenLimitError = true;
       throw limitErr;
@@ -53,6 +58,15 @@ export async function callLLM({ system, messages = [], max_tokens = 1024, forceP
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data?.error) {
     console.error("[callLLM] API error", resolvedModel, resp.status, data?.error);
+    // The pre-flight length check above is a rough heuristic — if Cerebras
+    // itself still rejects the request for genuinely exceeding its context
+    // window, surface the same friendly message instead of the raw API error.
+    if (resolvedModel.startsWith("cerebras/") && CONTEXT_LIMIT_ERROR_RE.test(String(data?.error || ""))) {
+      const limitErr = new Error(CEREBRAS_CONTEXT_LIMIT_MSG);
+      limitErr.isNetworkError = false;
+      limitErr.isTokenLimitError = true;
+      throw limitErr;
+    }
     const apiErr = new Error(data?.error || `HTTP ${resp.status}`);
     apiErr.isNetworkError = false;
     throw apiErr;
