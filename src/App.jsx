@@ -2546,7 +2546,11 @@ ${textToTranslate.substring(0, 4000)}
 
     let raw = "";
     try {
+      // Fixed to Groq — this button is intentionally independent of the
+      // general AI_MODELS dropdown (its Gemini-button sibling below is the
+      // only other exception; every other AI feature follows the dropdown).
       const data = await callLLM({
+          model: "groq/llama-3.3-70b-versatile",
           max_tokens: 4000,
           messages: [{ role: "user", content: prompt }]
         });
@@ -2603,8 +2607,11 @@ ${textToAnalyze.substring(0, 4000)}
 
     let raw = "";
     try {
-      const geminiModel = aiModel.startsWith("gemini/") ? aiModel.replace(/^gemini\//, "") : "gemini-2.5-flash";
-      const data = await analyzeHistoricalContext({ prompt, max_tokens: 6000, model: geminiModel });
+      // Fixed to Gemini, independent of the general dropdown — tries
+      // flash-lite first (higher free-tier quota), then falls back to flash
+      // server-side on 429/5xx (see /api/gemini-analyze). Never falls back
+      // to Groq, even if both Gemini variants fail.
+      const data = await analyzeHistoricalContext({ prompt, max_tokens: 6000, model: "gemini-2.5-flash-lite" });
       raw = data.content?.map(c => c.text || "").join("") || "{}";
     } catch (err) {
       setHistoricalAnalysisError(

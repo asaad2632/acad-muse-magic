@@ -165,6 +165,10 @@ export const Route = createFileRoute("/api/ai-chat")({
           // ends up serving the response instead (Lovable's gateway is OpenAI-shaped
           // even when the primary provider was Gemini).
           let respShape: "openai" | "gemini" = provider === "gemini" ? "gemini" : "openai";
+          // Tracks which provider actually ends up serving the response, so the
+          // client can tell when a fallback kicked in (see the `provider` field
+          // on the returned JSON below).
+          let respProvider: string = provider;
 
           let resp: Response | null = null;
           let lastErrText = "";
@@ -176,28 +180,50 @@ export const Route = createFileRoute("/api/ai-chat")({
             await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
           }
 
-          // Fallback: if the primary provider is still failing with 5xx/429, try Lovable
-          // Cloud (Gemini) as a last resort — only for Groq/OpenRouter primaries, since
-          // Lovable itself is the fallback target.
-          if (
-            resp &&
-            !resp.ok &&
-            provider !== "lovable" &&
-            (resp.status === 429 || resp.status >= 500)
-          ) {
-            const key = process.env.LOVABLE_API_KEY;
-            if (key) {
-              const fbPayload = JSON.stringify({
-                model: "google/gemini-2.5-flash",
-                messages: toOpenAIMessages(body.messages || [], body.system, true),
-                max_tokens: body.max_tokens ?? 1024,
-              });
-              resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
-                body: fbPayload,
-              });
-              respShape = "openai";
+          // Fallback on 429/5xx from the primary provider.
+          // - Gemini specifically falls back to Groq: Gemini's free tier has a
+          //   very low daily quota (e.g. 20 req/day on flash-lite), and Groq is
+          //   a genuinely different backend/quota rather than another
+          //   Gemini-backed path.
+          // - Groq/OpenRouter primaries keep the existing Lovable Cloud
+          //   (Gemini gateway) fallback — unrelated to the Gemini-quota issue.
+          if (resp && !resp.ok && provider !== "lovable" && (resp.status === 429 || resp.status >= 500)) {
+            if (provider === "gemini") {
+              const gKey = (process.env.GROQ_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+              if (gKey) {
+                const fbPayload = JSON.stringify({
+                  model: "llama-3.3-70b-versatile",
+                  messages: toOpenAIMessages(body.messages || [], body.system, false),
+                  max_tokens: body.max_tokens ?? 1024,
+                });
+                resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${gKey}`,
+                    Accept: "application/json",
+                  },
+                  body: fbPayload,
+                });
+                respShape = "openai";
+                if (resp.ok) respProvider = "groq";
+              }
+            } else {
+              const key = process.env.LOVABLE_API_KEY;
+              if (key) {
+                const fbPayload = JSON.stringify({
+                  model: "google/gemini-2.5-flash",
+                  messages: toOpenAIMessages(body.messages || [], body.system, true),
+                  max_tokens: body.max_tokens ?? 1024,
+                });
+                resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "Lovable-API-Key": key },
+                  body: fbPayload,
+                });
+                respShape = "openai";
+                if (resp.ok) respProvider = "lovable";
+              }
             }
           }
 
@@ -214,7 +240,7 @@ export const Route = createFileRoute("/api/ai-chat")({
             respShape === "gemini"
               ? data?.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text || "").join("") || ""
               : data?.choices?.[0]?.message?.content || "";
-          return new Response(JSON.stringify({ content: [{ type: "text", text }] }), {
+          return new Response(JSON.stringify({ content: [{ type: "text", text }], provider: respProvider }), {
             headers: { "Content-Type": "application/json" },
           });
         } catch (e) {

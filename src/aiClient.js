@@ -1,33 +1,38 @@
 import { getSelectedModel } from "./config";
 
 // Unified AI call. Proxied through /api/ai-chat (Lovable AI Gateway server-side).
-// Returns Anthropic-shaped: { content: [{ type: "text", text: "..." }] }
-export async function callLLM({ system, messages = [], max_tokens = 1024, forceProvider } = {}) {
-  const model = getSelectedModel();
+// Returns Anthropic-shaped: { content: [{ type: "text", text: "..." }], provider }
+//
+// `model` defaults to the general AI_MODELS dropdown selection (config.js) —
+// that dropdown is the single source of truth for every feature that calls
+// callLLM. Pass an explicit `model` only for the translator's dedicated Groq
+// button (runTranslation), which is intentionally exempt from the dropdown.
+export async function callLLM({ system, messages = [], max_tokens = 1024, forceProvider, model } = {}) {
+  const resolvedModel = model || getSelectedModel();
   let resp;
   try {
     resp = await fetch("/api/ai-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ system, messages, max_tokens, model, forceProvider }),
+      body: JSON.stringify({ system, messages, max_tokens, model: resolvedModel, forceProvider }),
     });
   } catch (err) {
     // fetch() itself only throws for genuine network failures (offline, DNS,
     // connection refused, CORS) — never for HTTP error statuses.
-    console.error("[callLLM] network error", model, err);
+    console.error("[callLLM] network error", resolvedModel, err);
     const netErr = new Error(err?.message || "network error");
     netErr.isNetworkError = true;
     throw netErr;
   }
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok || data?.error) {
-    console.error("[callLLM] API error", model, resp.status, data?.error);
+    console.error("[callLLM] API error", resolvedModel, resp.status, data?.error);
     const apiErr = new Error(data?.error || `HTTP ${resp.status}`);
     apiErr.isNetworkError = false;
     throw apiErr;
   }
   const text = data?.content?.[0]?.text || "";
-  return { content: [{ type: "text", text }] };
+  return { content: [{ type: "text", text }], provider: data?.provider };
 }
 
 // Analyze a document. Text-based files (md/txt/docx/pdf) are sent as extracted
@@ -46,10 +51,10 @@ export async function analyzeDocumentLLM({ prompt, fileName, mimeType, base64, t
   });
 }
 
-// Historical-analysis feature (Gemini API direct, separate from callLLM/callLLM
-// consumers) — proxied through /api/gemini-analyze, a standalone server route
-// with its own key (GEMINI_API_KEY), independent of the Groq/OpenRouter/Lovable
-// translation path.
+// Historical-analysis feature — the translator's "ترجم بـ Gemini" button.
+// Proxied through /api/gemini-analyze, a standalone server route with its own
+// key (GEMINI_API_KEY), fixed to Gemini and independent of the general
+// AI_MODELS dropdown / callLLM's Groq-Lovable-OpenRouter routing.
 export async function analyzeHistoricalContext({ prompt, max_tokens = 2000, model }) {
   let resp;
   try {
