@@ -39,6 +39,7 @@ memory/
 
 .env
 .env.*
+!.env.example
 *.env
 credentials.json
 *.pem

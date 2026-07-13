@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-// Server-side proxy in front of src/spacesStorage.js (DigitalOcean Spaces).
-// The Spaces secret key must never reach the browser, so all reads/writes of
+// Server-side proxy in front of src/spacesStorage.js (Cloudflare R2).
+// The R2 secret key must never reach the browser, so all reads/writes of
 // thesis-files-style uploads go through this route instead of calling
 // spacesStorage.js directly from client code. Auth is the same session
 // cookie as every other /api route (see src/session.server.ts).

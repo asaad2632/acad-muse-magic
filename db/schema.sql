@@ -1,4 +1,4 @@
--- AcadArchiv — plain PostgreSQL schema for DigitalOcean Managed Postgres.
+-- AcadArchiv — plain PostgreSQL schema for Neon Postgres.
 -- Ported 1:1 from supabase/migrations/*.sql, with two simplifications:
 --   1. auth.users + allowed_users (Supabase-specific) are merged into a single
 --      local `users` table (id, email, password_hash, role, token_version).

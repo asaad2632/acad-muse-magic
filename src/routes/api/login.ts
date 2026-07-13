@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-// Login: verifies against the local `users` table in DigitalOcean Postgres.
+// Login: verifies against the local `users` table in Neon Postgres.
 // See src/db.server.ts, src/passwordHash.server.ts, src/session.server.ts.
 
 const GENERIC_ERROR = "بيانات الدخول غير صحيحة";

@@ -1,12 +1,12 @@
-// Server-only. Talks to DigitalOcean Spaces (S3-compatible) using AWS SigV4
+// Server-only. Talks to Cloudflare R2 (S3-compatible) using AWS SigV4
 // request signing, hand-rolled with node:crypto so no new dependency is
 // needed for a single-bucket integration.
 //
-// SECURITY: DO_SPACES_SECRET is a signing key, not a bearer token — it must
-// never reach the client bundle. Only import this module from server code
-// (a route under src/routes/api/*, or another server-only module). Never
-// import it from App.jsx, cloudSync.js, or any other file that ships to
-// the browser.
+// SECURITY: R2_SECRET_ACCESS_KEY is a signing key, not a bearer token — it
+// must never reach the client bundle. Only import this module from server
+// code (a route under src/routes/api/*, or another server-only module).
+// Never import it from App.jsx, cloudSync.js, or any other file that ships
+// to the browser.
 //
 // Mirrors the upload/getUrl/delete shape of the Supabase Storage helpers in
 // cloudSync.js (uploadLibraryFile / getLibraryFileUrl / deleteLibraryFile)
@@ -15,25 +15,29 @@
 import { createHmac, createHash } from "node:crypto";
 
 const SERVICE = "s3";
+// R2 is region-less; SigV4 still requires a region string in the signature,
+// and R2 accepts the literal "auto" for it (not an AWS region name).
+const REGION = "auto";
 
 function readConfig() {
-  const key = process.env.DO_SPACES_KEY;
-  const secret = process.env.DO_SPACES_SECRET;
-  const region = process.env.DO_SPACES_REGION || "fra1";
-  const bucket = process.env.DO_SPACES_BUCKET;
-  const endpoint = process.env.DO_SPACES_ENDPOINT || `https://${region}.digitaloceanspaces.com`;
+  const key = process.env.R2_ACCESS_KEY_ID;
+  const secret = process.env.R2_SECRET_ACCESS_KEY;
+  const accountId = process.env.R2_ACCOUNT_ID;
+  const bucket = process.env.R2_BUCKET_NAME;
+  const endpoint = `https://${accountId}.r2.cloudflarestorage.com`;
 
   const missing = [
-    ...(!key ? ["DO_SPACES_KEY"] : []),
-    ...(!secret ? ["DO_SPACES_SECRET"] : []),
-    ...(!bucket ? ["DO_SPACES_BUCKET"] : []),
+    ...(!key ? ["R2_ACCESS_KEY_ID"] : []),
+    ...(!secret ? ["R2_SECRET_ACCESS_KEY"] : []),
+    ...(!accountId ? ["R2_ACCOUNT_ID"] : []),
+    ...(!bucket ? ["R2_BUCKET_NAME"] : []),
   ];
   if (missing.length) {
     throw new Error(`[spacesStorage] Missing environment variable(s): ${missing.join(", ")}`);
   }
 
   const host = `${bucket}.${new URL(endpoint).host}`;
-  return { key, secret, region, bucket, host };
+  return { key, secret, region: REGION, bucket, host };
 }
 
 function sha256Hex(input) {
@@ -111,7 +115,7 @@ async function signedRequest(method, key, { body, contentType } = {}) {
 }
 
 // Presigned GET URL, computed locally (no network call) so the browser can
-// fetch the object directly without ever seeing DO_SPACES_SECRET.
+// fetch the object directly without ever seeing R2_SECRET_ACCESS_KEY.
 export function getSignedUrl(key, expiresInSeconds = 3600) {
   const { key: accessKey, secret, region, host } = readConfig();
   const { amzDate, dateStamp } = amzTimestamp();

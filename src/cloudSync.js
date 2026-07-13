@@ -188,7 +188,7 @@ export function debounce(fn, ms = 600) {
 }
 
 // ==================== Phase 3b: library_sources + Storage ====================
-// File bytes live in DigitalOcean Spaces, proxied through /api/spaces-storage
+// File bytes live in Cloudflare R2, proxied through /api/spaces-storage
 // (see src/routes/api/spaces-storage.ts + src/spacesStorage.js). Auth is the
 // same session cookie as everything else — no manual header needed.
 

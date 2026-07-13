@@ -1,4 +1,4 @@
-// Server-only. Connection pool to DigitalOcean Managed Postgres.
+// Server-only. Connection pool to Neon Postgres.
 //
 // SECURITY: DATABASE_URL carries DB credentials — never import this module
 // from client-bundled code (App.jsx, cloudSync.js, or any route/component
@@ -11,16 +11,12 @@ function createPool(): Pool {
   if (!DATABASE_URL) {
     throw new Error("[db.server] Missing environment variable: DATABASE_URL");
   }
-  // pg-connection-string parses a `sslmode` query param into its own `ssl`
-  // object, which then clobbers the explicit `ssl` option below (pg merges
-  // parsed-connectionString fields over the passed-in config). Strip it so
-  // rejectUnauthorized:false actually takes effect against DO's self-signed
-  // chain, instead of falling back to strict verification.
-  const connectionString = DATABASE_URL.replace(/([?&])sslmode=[^&]*&?/, "$1").replace(/[?&]$/, "");
+  // Neon's cert chain is CA-signed, so standard `sslmode=require` in the
+  // connection string (parsed by pg-connection-string) is sufficient —
+  // no rejectUnauthorized override needed.
   return new Pool({
-    connectionString,
+    connectionString: DATABASE_URL,
     max: 5,
-    ssl: { rejectUnauthorized: false },
   });
 }
 
