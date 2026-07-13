@@ -2612,7 +2612,6 @@ ${textToTranslate.substring(0, 4000)}
   // Cerebras' free-tier context is small (~8K tokens total) — a lower
   // max_tokens leaves more headroom before hitting that ceiling.
   const runCerebrasTranslation = () => runPlainTranslation("cerebras/gemma-4-31b", 2000);
-  };
 
   // مسار مستقل تماماً عن ترجمة Groq (runTranslation أعلاه): يأخذ النص الأجنبي
   // الأصلي مباشرة (وليس ناتج ترجمة Groq) ويطلب من Gemini في استدعاء واحد أن
