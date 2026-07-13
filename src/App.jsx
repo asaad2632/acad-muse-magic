@@ -59,6 +59,12 @@ function extractJsonFromLlmText(raw) {
   return escapeControlCharsInJsonStrings(stripped.slice(first, last + 1));
 }
 
+// يحوّل قيمة provider الراجعة من /api/ai-chat إلى تسمية عرض مقروءة — يُستخدم
+// لعرض شارة صغيرة توضح أي مزوّد ردّ فعلياً (خصوصاً بعد fallback تلقائي).
+function providerLabel(provider) {
+  return { groq: "Groq", gemini: "Gemini", openrouter: "OpenRouter", lovable: "Lovable" }[provider] || provider;
+}
+
 // ============================================================
 // بيانات الفصول والمباحث — مستخرجة من خطة السمنار
 // الخليج العربي في سنوات الحرب العالمية الثانية 1939-1945
@@ -419,6 +425,7 @@ export default function App() {
   const [searchFilters, setSearchFilters] = useState({ query:"", chapterId:"", priority:"", isNew:"", status:"" });
   const [selectedDoc, setSelectedDoc] = useState(null);
   const [aiResult, setAiResult] = useState("");
+  const [aiResultProvider, setAiResultProvider] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [notif, setNotif] = useState(null);
   const [userEmail, setUserEmail] = useState("");
@@ -2050,6 +2057,7 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
   const handleAI = async (doc) => {
     setAiLoading(true);
     setAiResult("");
+    setAiResultProvider("");
     try {
       const data = await callLLM({
           max_tokens:1000,
@@ -2073,6 +2081,7 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
 أجب بالعربية بأسلوب أكاديمي مختصر.` }]
         });
       setAiResult(data.content?.map(c=>c.text||"").join("") || "لم يُحصل على رد");
+      setAiResultProvider(data.provider || "");
     } catch (err) {
       setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
     }
@@ -2083,6 +2092,7 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
     if (!q) return;
     setAiLoading(true);
     setAiResult("");
+    setAiResultProvider("");
     const docsCtx = combinedDocs.slice(0,30).map(d=>`[${d.id}] ${d.title} | ${d.archiveRef||""} | ف${d.chapterId}`).join("\n");
     try {
       const data = await callLLM({
@@ -2120,6 +2130,7 @@ ${docsCtx}
 اجعل الإجابة كثيفة معلوماتياً — كل سطر يحمل معلومة نافعة.` }]
         });
       setAiResult(data.content?.map(c=>c.text||"").join("") || "");
+      setAiResultProvider(data.provider || "");
     } catch (err) {
       setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
     }
@@ -2816,7 +2827,7 @@ ${docsContext}
           messages:   [{ role: "user", content: "ابدأ المناقشة" }]
         });
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ في بدء الجلسة.";
-      setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
+      setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar"), provider: data.provider }]);
     } catch (err) {
       const text = err?.isNetworkError
         ? "تعذّر الاتصال بنظام المحاكاة — تأكد من الاتصال بالإنترنت."
@@ -2853,7 +2864,7 @@ ${docsContext}
           messages:   apiMessages,
         });
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ.";
-      setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
+      setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar"), provider: data.provider }]);
     } catch (err) {
       const text = err?.isNetworkError
         ? "تعذّر الاتصال — حاول مرة أخرى."
@@ -3977,6 +3988,7 @@ ${docsContext}
             {aiResult && <div style={{background:"#faf5ff",borderRadius:12,padding:20,border:"0.5px solid #d8b4fe"}}>
               <div style={{fontWeight:600,color:"#7C3AED",marginBottom:12,fontSize:13}}>🤖 تحليل الذكاء الاصطناعي</div>
               <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.8,margin:0}}>{aiResult}</pre>
+              {aiResultProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تم الرد بواسطة {providerLabel(aiResultProvider)}</div>}
             </div>}
           </div>
         )}
@@ -4328,7 +4340,10 @@ ${docsContext}
               <div style={{background:"#faf5ff",borderRadius:12,padding:20,border:"0.5px solid #d8b4fe"}}>
                 <div style={{fontWeight:600,color:"#7C3AED",marginBottom:12,fontSize:13}}>🤖 تحليل المساعد الذكي</div>
                 <pre style={{whiteSpace:"pre-wrap",fontFamily:"inherit",fontSize:13,lineHeight:1.9,margin:0}}>{aiResult}</pre>
-                <button onClick={()=>{navigator.clipboard.writeText(aiResult);showNotif("✅ تم النسخ!");}} style={{marginTop:12,padding:"7px 14px",borderRadius:8,background:"white",border:"0.5px solid #d8b4fe",color:"#7C3AED",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>📋 نسخ التحليل</button>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:12}}>
+                  <button onClick={()=>{navigator.clipboard.writeText(aiResult);showNotif("✅ تم النسخ!");}} style={{padding:"7px 14px",borderRadius:8,background:"white",border:"0.5px solid #d8b4fe",color:"#7C3AED",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>📋 نسخ التحليل</button>
+                  {aiResultProvider && <div style={{fontSize:10,color:"#94a3b8"}}>تم الرد بواسطة {providerLabel(aiResultProvider)}</div>}
+                </div>
               </div>
             )}
 
@@ -5452,7 +5467,10 @@ ${docsContext}
                             {msg.role==="committee" ? "🎓 رئيس لجنة المناقشة" : "👨‍💼 الباحث: اسعد النعيمي"}
                           </div>
                           <div style={{fontSize:13,lineHeight:1.85,color:"#1e293b",direction:"rtl"}}>{msg.text}</div>
-                          <div style={{fontSize:10,color:"#94a3b8",marginTop:5,textAlign:"left"}}>{msg.ts}</div>
+                          <div style={{fontSize:10,color:"#94a3b8",marginTop:5,display:"flex",justifyContent:"space-between",gap:8}}>
+                            <span>{msg.role==="committee" && msg.provider ? `تم الرد بواسطة ${providerLabel(msg.provider)}` : ""}</span>
+                            <span>{msg.ts}</span>
+                          </div>
                         </div>
                       </div>
                     ))}
