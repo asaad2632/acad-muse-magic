@@ -1,9 +1,12 @@
 // AI model configuration. The app proxies all calls through /api/ai-chat.
-// Three providers: Groq (user's own key), Lovable Cloud (Gemini gateway),
-// and OpenRouter (free-tier community-hosted models).
+// Providers: Groq (user's own key), Cerebras (user's own key, ~8K token
+// free-tier context — see callLLM's pre-flight length check in aiClient.js),
+// Lovable Cloud (Gemini gateway), Gemini (direct), and OpenRouter (free-tier
+// community-hosted models).
 
 export const AI_MODELS = [
   { id: "groq/llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B (مفتاحك الخاص)" },
+  { id: "cerebras/gemma-4-31b", label: "Cerebras — سرعة فائقة (مجاني)" },
   { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "OpenRouter — Llama 3.3 70B (مجاني)" },
   { id: "google/gemini-3-flash-preview", label: "Lovable Cloud — Gemini 3 Flash" },
   { id: "gemini/gemini-2.5-flash", label: "Gemini — دقة عالية (2.5 Flash، حصة يومية محدودة)" },

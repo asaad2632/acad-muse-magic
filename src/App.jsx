@@ -62,7 +62,20 @@ function extractJsonFromLlmText(raw) {
 // يحوّل قيمة provider الراجعة من /api/ai-chat إلى تسمية عرض مقروءة — يُستخدم
 // لعرض شارة صغيرة توضح أي مزوّد ردّ فعلياً (خصوصاً بعد fallback تلقائي).
 function providerLabel(provider) {
-  return { groq: "Groq", gemini: "Gemini", openrouter: "OpenRouter", lovable: "Lovable" }[provider] || provider;
+  return (
+    { groq: "Groq", gemini: "Gemini", openrouter: "OpenRouter", lovable: "Lovable", cerebras: "Cerebras" }[
+      provider
+    ] || provider
+  );
+}
+
+// Formats a callLLM() error for display — a token-limit error (Cerebras'
+// small free-tier context) is already a clear user-facing message on its
+// own, so it skips the generic "تعذّر الاتصال" connection-failure framing.
+function aiErrorMessage(err) {
+  if (err?.isTokenLimitError) return err.message;
+  if (err?.isNetworkError) return "خطأ شبكة — تأكد من الاتصال بالإنترنت";
+  return `تعذّر الاتصال: ${err?.message || err}`;
 }
 
 // ============================================================
@@ -2083,7 +2096,7 @@ ${addForm.author ? `المؤلف المعروف: ${addForm.author}` : ""}
       setAiResult(data.content?.map(c=>c.text||"").join("") || "لم يُحصل على رد");
       setAiResultProvider(data.provider || "");
     } catch (err) {
-      setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
+      setAiResult(aiErrorMessage(err));
     }
     setAiLoading(false);
   };
@@ -2132,7 +2145,7 @@ ${docsCtx}
       setAiResult(data.content?.map(c=>c.text||"").join("") || "");
       setAiResultProvider(data.provider || "");
     } catch (err) {
-      setAiResult(err?.isNetworkError ? "خطأ شبكة — تأكد من الاتصال بالإنترنت" : `تعذّر الاتصال: ${err?.message || err}`);
+      setAiResult(aiErrorMessage(err));
     }
     setAiLoading(false);
   };
@@ -2829,9 +2842,11 @@ ${docsContext}
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ في بدء الجلسة.";
       setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar"), provider: data.provider }]);
     } catch (err) {
-      const text = err?.isNetworkError
-        ? "تعذّر الاتصال بنظام المحاكاة — تأكد من الاتصال بالإنترنت."
-        : `تعذّر الاتصال بنظام المحاكاة: ${err?.message || err}`;
+      const text = err?.isTokenLimitError
+        ? err.message
+        : err?.isNetworkError
+          ? "تعذّر الاتصال بنظام المحاكاة — تأكد من الاتصال بالإنترنت."
+          : `تعذّر الاتصال بنظام المحاكاة: ${err?.message || err}`;
       setDefenseMessages([{ role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
     }
     setDefenseLoading(false);
@@ -2866,9 +2881,11 @@ ${docsContext}
       const text = data.content?.map(c => c.text || "").join("") || "حدث خطأ.";
       setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar"), provider: data.provider }]);
     } catch (err) {
-      const text = err?.isNetworkError
-        ? "تعذّر الاتصال — حاول مرة أخرى."
-        : `تعذّر الاتصال: ${err?.message || err}`;
+      const text = err?.isTokenLimitError
+        ? err.message
+        : err?.isNetworkError
+          ? "تعذّر الاتصال — حاول مرة أخرى."
+          : `تعذّر الاتصال: ${err?.message || err}`;
       setDefenseMessages(prev => [...prev, { role: "committee", text, ts: new Date().toLocaleTimeString("ar") }]);
     }
     setDefenseLoading(false);

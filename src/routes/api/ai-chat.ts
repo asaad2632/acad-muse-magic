@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
 
-type Provider = "groq" | "lovable" | "openrouter" | "gemini";
+type Provider = "groq" | "lovable" | "openrouter" | "gemini" | "cerebras";
 
 function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal = false) {
   const msgs: { role: string; content: unknown }[] = [];
@@ -51,9 +51,11 @@ function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "groq") return "groq";
   if (forceProvider === "openrouter") return "openrouter";
   if (forceProvider === "gemini") return "gemini";
+  if (forceProvider === "cerebras") return "cerebras";
   if (model.startsWith("groq/")) return "groq";
   if (model.startsWith("openrouter/")) return "openrouter";
   if (model.startsWith("gemini/")) return "gemini";
+  if (model.startsWith("cerebras/")) return "cerebras";
   return "lovable";
 }
 
@@ -128,6 +130,22 @@ export const Route = createFileRoute("/api/ai-chat")({
             sendModel = model.replace(/^gemini\//, "");
             endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${sendModel}:generateContent?key=${gemKey}`;
             headers = { "Content-Type": "application/json" };
+          } else if (provider === "cerebras") {
+            const cKey = (process.env.CEREBRAS_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+            if (!cKey) {
+              return new Response(JSON.stringify({ error: "Missing CEREBRAS_API_KEY" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            // OpenAI-compatible chat completions API.
+            endpoint = "https://api.cerebras.ai/v1/chat/completions";
+            headers = {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${cKey}`,
+              Accept: "application/json",
+            };
+            sendModel = model.replace(/^cerebras\//, "");
           } else {
             const key = process.env.LOVABLE_API_KEY;
             if (!key) {
@@ -181,14 +199,14 @@ export const Route = createFileRoute("/api/ai-chat")({
           }
 
           // Fallback on 429/5xx from the primary provider.
-          // - Gemini specifically falls back to Groq: Gemini's free tier has a
-          //   very low daily quota (e.g. 20 req/day on flash-lite), and Groq is
-          //   a genuinely different backend/quota rather than another
+          // - Gemini and Cerebras fall back to Groq: both have tight free-tier
+          //   limits (Gemini's daily quota, Cerebras' ~8K token context), and
+          //   Groq is a genuinely different backend/quota rather than another
           //   Gemini-backed path.
           // - Groq/OpenRouter primaries keep the existing Lovable Cloud
-          //   (Gemini gateway) fallback — unrelated to the Gemini-quota issue.
+          //   (Gemini gateway) fallback — unrelated to the above.
           if (resp && !resp.ok && provider !== "lovable" && (resp.status === 429 || resp.status >= 500)) {
-            if (provider === "gemini") {
+            if (provider === "gemini" || provider === "cerebras") {
               const gKey = (process.env.GROQ_API_KEY || "").trim().replace(/^["']|["']$/g, "");
               if (gKey) {
                 const fbPayload = JSON.stringify({

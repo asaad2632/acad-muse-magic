@@ -1,5 +1,13 @@
 import { getSelectedModel } from "./config";
 
+// Rough token estimate — no tokenizer dependency, so this is a conservative
+// heuristic (chars/3) meant to warn *before* Cerebras' free-tier ~8K token
+// context limit rejects the request, not to be exact.
+function estimateTokens(text) {
+  return Math.ceil((text || "").length / 3);
+}
+const CEREBRAS_TOKEN_WARNING_THRESHOLD = 6000;
+
 // Unified AI call. Proxied through /api/ai-chat (Lovable AI Gateway server-side).
 // Returns Anthropic-shaped: { content: [{ type: "text", text: "..." }], provider }
 //
@@ -9,6 +17,24 @@ import { getSelectedModel } from "./config";
 // button (runTranslation), which is intentionally exempt from the dropdown.
 export async function callLLM({ system, messages = [], max_tokens = 1024, forceProvider, model } = {}) {
   const resolvedModel = model || getSelectedModel();
+
+  // Cerebras' free tier has a small (~8K token) total context — check before
+  // sending so the user gets a clear message instead of an opaque API error.
+  if (resolvedModel.startsWith("cerebras/")) {
+    const combined = [
+      system,
+      ...messages.map((m) => (typeof m.content === "string" ? m.content : JSON.stringify(m.content))),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (estimateTokens(combined) > CEREBRAS_TOKEN_WARNING_THRESHOLD) {
+      const limitErr = new Error("النص طويل جداً لهذا النموذج، جرّب موديل آخر من القائمة أو قسّم النص");
+      limitErr.isNetworkError = false;
+      limitErr.isTokenLimitError = true;
+      throw limitErr;
+    }
+  }
+
   let resp;
   try {
     resp = await fetch("/api/ai-chat", {
