@@ -5279,7 +5279,7 @@ ${docsContext}
                     </div>
                     <div style={{display:"flex",gap:8,marginTop:12}}>
                       <button
-                        onClick={()=>saveTranslation()}
+                        onClick={()=>saveTranslation(translatedResultProvider || "groq")}
                         style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
                         💾 حفظ في سجل الترجمات
                       </button>
@@ -5459,7 +5459,13 @@ ${docsContext}
                         {tr.docMeta?.docType && <span>📄 {tr.docMeta.docType}</span>}
                         <span>💾 {tr.savedAt}</span>
                         <span>⭐ {tr.keyPoints?.length||0} نقطة جوهرية</span>
-                        <span>{tr.source==="gemini" ? "🏛️ Gemini" : "🌐 Groq"}</span>
+                        <span style={{
+                          background: tr.source==="gemini" ? "#fef3e2" : tr.source==="cerebras" ? "#dcfce7" : "#eff6ff",
+                          color:      tr.source==="gemini" ? "#92400E" : tr.source==="cerebras" ? "#0F766E" : "#1e3a5f",
+                          borderRadius:4, padding:"1px 6px", fontWeight:600,
+                        }}>
+                          {tr.source==="gemini" ? "🏛️" : tr.source==="cerebras" ? "⚡" : "🌐"} {providerLabel(tr.source || "groq")}
+                        </span>
                       </div>
                       {tr.originalText && (
                         <div style={{fontSize:10,color:"#94a3b8",marginTop:3,fontFamily:"monospace",direction:"ltr",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>

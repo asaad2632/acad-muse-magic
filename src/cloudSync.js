@@ -433,6 +433,9 @@ export async function syncCards(arr) {
 }
 
 // ---------- translations ----------
+// Keep in sync with the providers runPlainTranslation()/runHistoricalAnalysis()
+// in App.jsx can actually tag a saved entry with.
+const TRANSLATION_SOURCES = ["groq", "gemini", "cerebras"];
 function trToRow(t) {
   return {
     client_id: String(t.id),
@@ -442,7 +445,7 @@ function trToRow(t) {
     key_points: Array.isArray(t.keyPoints) ? t.keyPoints : (t.keyPoints || []),
     doc_meta: t.docMeta ?? null,
     saved_at: t.savedAt ?? null,
-    source: t.source === "gemini" ? "gemini" : "groq",
+    source: TRANSLATION_SOURCES.includes(t.source) ? t.source : "groq",
   };
 }
 function rowToTr(r) {
@@ -452,7 +455,7 @@ function rowToTr(r) {
     id: idNum, fileName: r.file_name || "", originalText: r.original_text || "",
     translation: r.translation || "", keyPoints: r.key_points || [],
     docMeta: r.doc_meta || null, savedAt: r.saved_at || "",
-    source: r.source === "gemini" ? "gemini" : "groq",
+    source: TRANSLATION_SOURCES.includes(r.source) ? r.source : "groq",
   };
 }
 export async function loadTranslations() { return (await loadByClientId("/api/data/translations")).map(rowToTr); }
