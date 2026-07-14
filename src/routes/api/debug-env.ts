@@ -11,15 +11,28 @@ export const Route = createFileRoute("/api/debug-env")({
     handlers: {
       GET: async () => {
         let dbHost = "ERROR_PARSING";
+        const raw = process.env.DATABASE_URL || "";
         try {
-          const url = new URL(process.env.DATABASE_URL || "");
+          const url = new URL(raw);
           dbHost = url.hostname + url.pathname;
         } catch {
-          dbHost = process.env.DATABASE_URL ? "SET_BUT_UNPARSEABLE" : "NOT_SET";
+          dbHost = raw ? "SET_BUT_UNPARSEABLE" : "NOT_SET";
         }
+        const dbUrlShape = raw
+          ? {
+              length: raw.length,
+              hasLeadingOrTrailingWhitespace: raw !== raw.trim(),
+              hasWrappingQuotes: /^['"].*['"]$/.test(raw.trim()),
+              hasNewline: /[\r\n]/.test(raw),
+              startsWithPostgres: /^postgres(ql)?:\/\//.test(raw.trim()),
+              first4Chars: raw.slice(0, 4),
+              last4Chars: raw.slice(-4),
+            }
+          : null;
         return new Response(
           JSON.stringify({
             dbHost,
+            dbUrlShape,
             hasSessionSecret: !!process.env.SESSION_SECRET,
             hasGroqKey: !!process.env.GROQ_API_KEY,
             hasGeminiKey: !!process.env.GEMINI_API_KEY,

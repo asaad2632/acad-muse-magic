@@ -17,6 +17,7 @@ import { Route as ApiSessionRouteImport } from './routes/api/session'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiGeminiAnalyzeRouteImport } from './routes/api/gemini-analyze'
+import { Route as ApiDebugEnvRouteImport } from './routes/api/debug-env'
 import { Route as ApiAiChatRouteImport } from './routes/api/ai-chat'
 import { Route as ApiDataTranslationsRouteImport } from './routes/api/data/translations'
 import { Route as ApiDataSupervisorReportsRouteImport } from './routes/api/data/supervisor-reports'
@@ -72,6 +73,11 @@ const ApiLoginRoute = ApiLoginRouteImport.update({
 const ApiGeminiAnalyzeRoute = ApiGeminiAnalyzeRouteImport.update({
   id: '/api/gemini-analyze',
   path: '/api/gemini-analyze',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiDebugEnvRoute = ApiDebugEnvRouteImport.update({
+  id: '/api/debug-env',
+  path: '/api/debug-env',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAiChatRoute = ApiAiChatRouteImport.update({
@@ -169,6 +175,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/auth': typeof AuthRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/debug-env': typeof ApiDebugEnvRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
@@ -194,6 +201,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/debug-env': typeof ApiDebugEnvRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
@@ -222,6 +230,7 @@ export interface FileRoutesById {
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
   '/api/ai-chat': typeof ApiAiChatRoute
+  '/api/debug-env': typeof ApiDebugEnvRoute
   '/api/gemini-analyze': typeof ApiGeminiAnalyzeRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
@@ -251,6 +260,7 @@ export interface FileRouteTypes {
     | '/'
     | '/auth'
     | '/api/ai-chat'
+    | '/api/debug-env'
     | '/api/gemini-analyze'
     | '/api/login'
     | '/api/logout'
@@ -276,6 +286,7 @@ export interface FileRouteTypes {
   to:
     | '/auth'
     | '/api/ai-chat'
+    | '/api/debug-env'
     | '/api/gemini-analyze'
     | '/api/login'
     | '/api/logout'
@@ -303,6 +314,7 @@ export interface FileRouteTypes {
     | '/_authenticated'
     | '/auth'
     | '/api/ai-chat'
+    | '/api/debug-env'
     | '/api/gemini-analyze'
     | '/api/login'
     | '/api/logout'
@@ -331,6 +343,7 @@ export interface RootRouteChildren {
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ApiAiChatRoute: typeof ApiAiChatRoute
+  ApiDebugEnvRoute: typeof ApiDebugEnvRoute
   ApiGeminiAnalyzeRoute: typeof ApiGeminiAnalyzeRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
@@ -410,6 +423,13 @@ declare module '@tanstack/react-router' {
       path: '/api/gemini-analyze'
       fullPath: '/api/gemini-analyze'
       preLoaderRoute: typeof ApiGeminiAnalyzeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/debug-env': {
+      id: '/api/debug-env'
+      path: '/api/debug-env'
+      fullPath: '/api/debug-env'
+      preLoaderRoute: typeof ApiDebugEnvRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ai-chat': {
@@ -549,6 +569,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ApiAiChatRoute: ApiAiChatRoute,
+  ApiDebugEnvRoute: ApiDebugEnvRoute,
   ApiGeminiAnalyzeRoute: ApiGeminiAnalyzeRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
