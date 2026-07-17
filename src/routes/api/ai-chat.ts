@@ -1,4 +1,3 @@
-```typescript name=src/routes/api/ai-chat.ts
 import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
@@ -54,11 +53,11 @@ function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "gemini") return "gemini";
   if (forceProvider === "cerebras") return "cerebras";
   if (forceProvider === "azure-openai") return "azure-openai";
+  if (model === "azure-openai" || model.startsWith("azure-openai/")) return "azure-openai";
   if (model.startsWith("groq/")) return "groq";
   if (model.startsWith("openrouter/")) return "openrouter";
   if (model.startsWith("gemini/")) return "gemini";
   if (model.startsWith("cerebras/")) return "cerebras";
-  if (model.startsWith("azure-openai/")) return "azure-openai";
   return "lovable";
 }
 
@@ -152,7 +151,11 @@ export const Route = createFileRoute("/api/ai-chat")({
           } else if (provider === "azure-openai") {
             const azKey = (process.env.AZURE_OPENAI_API_KEY || "").trim().replace(/^["']|["']$/g, "");
             const azEndpointRaw = (process.env.AZURE_OPENAI_ENDPOINT || "").trim().replace(/^["']|["']$/g, "");
-            const azDeployment = (process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "").trim().replace(/^["']|["']$/g, "");
+            const azDeploymentFromModel = model.split("/")[1]?.trim() || "";
+            const azDeploymentFromEnv = (process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "")
+              .trim()
+              .replace(/^["']|["']$/g, "");
+            const azDeployment = azDeploymentFromModel || azDeploymentFromEnv;
 
             if (!azKey) {
               return new Response(JSON.stringify({ error: "Missing AZURE_OPENAI_API_KEY" }), {
@@ -167,7 +170,7 @@ export const Route = createFileRoute("/api/ai-chat")({
               });
             }
             if (!azDeployment) {
-              return new Response(JSON.stringify({ error: "Missing AZURE_OPENAI_DEPLOYMENT_NAME" }), {
+              return new Response(JSON.stringify({ error: "Missing Azure deployment in model id or AZURE_OPENAI_DEPLOYMENT_NAME" }), {
                 status: 500,
                 headers: { "Content-Type": "application/json" },
               });
@@ -307,4 +310,3 @@ export const Route = createFileRoute("/api/ai-chat")({
     },
   },
 });
-```
