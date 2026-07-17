@@ -11,7 +11,7 @@ export const AI_MODELS = [
   { id: "google/gemini-3-flash-preview", label: "Lovable Cloud — Gemini 3 Flash" },
   { id: "gemini/gemini-2.5-flash", label: "Gemini — دقة عالية (2.5 Flash، حصة يومية محدودة)" },
   { id: "gemini/gemini-2.5-flash-lite", label: "Gemini — سرعة عالية (2.5 Flash Lite، حصة أعلى بكثير)" },
-  { id: "azure-openai/gpt-4o-mini", label: "Azure OpenAI — GPT-4o Mini" },
+  { id: "azure-openai/gpt-4o-mini", label: "Azure OpenAI — GPT-5 Mini" },
 ];
 
 export const MODEL_STORAGE_KEY = "acadarchiv_ai_model";
