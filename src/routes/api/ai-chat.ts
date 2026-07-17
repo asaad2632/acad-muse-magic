@@ -1,8 +1,9 @@
+```typescript name=src/routes/api/ai-chat.ts
 import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
 
-type Provider = "groq" | "lovable" | "openrouter" | "gemini" | "cerebras";
+type Provider = "groq" | "lovable" | "openrouter" | "gemini" | "cerebras" | "azure-openai";
 
 function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal = false) {
   const msgs: { role: string; content: unknown }[] = [];
@@ -52,10 +53,12 @@ function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "openrouter") return "openrouter";
   if (forceProvider === "gemini") return "gemini";
   if (forceProvider === "cerebras") return "cerebras";
+  if (forceProvider === "azure-openai") return "azure-openai";
   if (model.startsWith("groq/")) return "groq";
   if (model.startsWith("openrouter/")) return "openrouter";
   if (model.startsWith("gemini/")) return "gemini";
   if (model.startsWith("cerebras/")) return "cerebras";
+  if (model.startsWith("azure-openai/")) return "azure-openai";
   return "lovable";
 }
 
@@ -146,6 +149,39 @@ export const Route = createFileRoute("/api/ai-chat")({
               Accept: "application/json",
             };
             sendModel = model.replace(/^cerebras\//, "");
+          } else if (provider === "azure-openai") {
+            const azKey = (process.env.AZURE_OPENAI_API_KEY || "").trim().replace(/^["']|["']$/g, "");
+            const azEndpointRaw = (process.env.AZURE_OPENAI_ENDPOINT || "").trim().replace(/^["']|["']$/g, "");
+            const azDeployment = (process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "").trim().replace(/^["']|["']$/g, "");
+
+            if (!azKey) {
+              return new Response(JSON.stringify({ error: "Missing AZURE_OPENAI_API_KEY" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            if (!azEndpointRaw) {
+              return new Response(JSON.stringify({ error: "Missing AZURE_OPENAI_ENDPOINT" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+            if (!azDeployment) {
+              return new Response(JSON.stringify({ error: "Missing AZURE_OPENAI_DEPLOYMENT_NAME" }), {
+                status: 500,
+                headers: { "Content-Type": "application/json" },
+              });
+            }
+
+            const azEndpoint = azEndpointRaw.replace(/\/$/, "");
+            endpoint = `${azEndpoint}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=2024-10-21`;
+            headers = {
+              "Content-Type": "application/json",
+              "api-key": azKey,
+              Accept: "application/json",
+            };
+            // Azure deployment is selected via URL path.
+            sendModel = azDeployment;
           } else {
             const key = process.env.LOVABLE_API_KEY;
             if (!key) {
@@ -271,3 +307,4 @@ export const Route = createFileRoute("/api/ai-chat")({
     },
   },
 });
+```
