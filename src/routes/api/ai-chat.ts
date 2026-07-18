@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 type ChatMsg = { role: "user" | "assistant" | "system"; content: unknown };
 
-type Provider = "groq" | "lovable" | "openrouter" | "gemini" | "cerebras";
+type Provider = "groq" | "lovable" | "openrouter" | "gemini" | "cerebras" | "azure";
 
 function toOpenAIMessages(messages: ChatMsg[], system?: string, allowMultimodal = false) {
   const msgs: { role: string; content: unknown }[] = [];
@@ -52,10 +52,12 @@ function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "openrouter") return "openrouter";
   if (forceProvider === "gemini") return "gemini";
   if (forceProvider === "cerebras") return "cerebras";
+  if (forceProvider === "azure") return "azure";
   if (model.startsWith("groq/")) return "groq";
   if (model.startsWith("openrouter/")) return "openrouter";
   if (model.startsWith("gemini/")) return "gemini";
   if (model.startsWith("cerebras/")) return "cerebras";
+  if (model.startsWith("azure/")) return "azure";
   return "lovable";
 }
 
@@ -73,6 +75,77 @@ export const Route = createFileRoute("/api/ai-chat")({
           };
           const requestedModel = body.model || "groq/llama-3.3-70b-versatile";
           const provider = detectProvider(requestedModel, body.forceProvider);
+
+          // Azure OpenAI (GPT-5-mini): handled as a fully isolated branch with its own
+          // try/catch and error messages, rather than folded into the shared
+          // endpoint/headers/payload/fallback logic below — a misconfigured deployment
+          // should surface a clear diagnostic, not silently fall back to another
+          // provider (unlike Groq/OpenRouter/Gemini/Cerebras, which do fall back). This
+          // also keeps every other provider's code path untouched.
+          if (provider === "azure") {
+            try {
+              const azKey = (process.env.AZURE_OPENAI_API_KEY || "").trim();
+              const azEndpoint = (process.env.AZURE_OPENAI_ENDPOINT || "").trim().replace(/\/+$/, "");
+              const azDeployment = (process.env.AZURE_OPENAI_DEPLOYMENT_NAME || "").trim();
+              const missing = [
+                !azKey && "AZURE_OPENAI_API_KEY",
+                !azEndpoint && "AZURE_OPENAI_ENDPOINT",
+                !azDeployment && "AZURE_OPENAI_DEPLOYMENT_NAME",
+              ].filter(Boolean);
+              if (missing.length) {
+                return new Response(
+                  JSON.stringify({ error: `Azure OpenAI: متغيرات بيئة ناقصة (${missing.join(", ")})` }),
+                  { status: 500, headers: { "Content-Type": "application/json" } },
+                );
+              }
+
+              const azUrl = `${azEndpoint}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=2024-08-01-preview`;
+              let azResp: Response;
+              try {
+                azResp = await fetch(azUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json", "api-key": azKey },
+                  body: JSON.stringify({
+                    messages: toOpenAIMessages(body.messages || [], body.system, false),
+                    max_completion_tokens: body.max_tokens ?? 1024,
+                  }),
+                });
+              } catch (netErr) {
+                return new Response(
+                  JSON.stringify({
+                    error: `Azure OpenAI: تعذّر الاتصال بـ ${azEndpoint} — تحقق من AZURE_OPENAI_ENDPOINT والشبكة (${(netErr as Error)?.message || netErr})`,
+                  }),
+                  { status: 502, headers: { "Content-Type": "application/json" } },
+                );
+              }
+
+              if (!azResp.ok) {
+                const txt = await azResp.text().catch(() => "");
+                const friendly =
+                  azResp.status === 401 || azResp.status === 403
+                    ? "Azure OpenAI: مفتاح API غير صالح أو غير مصرّح — تحقق من AZURE_OPENAI_API_KEY"
+                    : azResp.status === 404
+                      ? "Azure OpenAI: لم يتم العثور على الـ Deployment — تحقق من AZURE_OPENAI_DEPLOYMENT_NAME والـ Endpoint"
+                      : `Azure OpenAI ${azResp.status}: ${txt}`;
+                return new Response(JSON.stringify({ error: friendly }), {
+                  status: azResp.status,
+                  headers: { "Content-Type": "application/json" },
+                });
+              }
+
+              const azData = await azResp.json();
+              const text = azData?.choices?.[0]?.message?.content || "";
+              return new Response(JSON.stringify({ content: [{ type: "text", text }], provider: "azure" }), {
+                headers: { "Content-Type": "application/json" },
+              });
+            } catch (e) {
+              return new Response(
+                JSON.stringify({ error: `Azure OpenAI: ${String((e as Error)?.message || e)}` }),
+                { status: 500, headers: { "Content-Type": "application/json" } },
+              );
+            }
+          }
+
           // If caller forced lovable but sent a groq/openrouter model id, swap to a lovable model.
           const model =
             body.forceProvider === "lovable" && !requestedModel.startsWith("google/")
