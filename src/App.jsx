@@ -2734,7 +2734,10 @@ ${textToTranslate.substring(0, 4000)}
   // Cerebras' free-tier context is small (~8K tokens total) — a lower
   // max_tokens leaves more headroom before hitting that ceiling.
   const runCerebrasTranslation = () => runPlainTranslation("cerebras/gemma-4-31b", 2000, cerebrasSetters);
-  const runAzureTranslation = () => runPlainTranslation("azure/gpt-5-mini", 2000, azureSetters);
+  // gpt-5-mini هو موديل reasoning يستهلك جزءاً من max_output_tokens على
+  // التفكير الداخلي قبل إنتاج نص الإخراج الفعلي — قيمة منخفضة (2000) كانت
+  // تُقطع قبل اكتمال JSON مع النصوص الطويلة (500+ كلمة)، فيفشل JSON.parse.
+  const runAzureTranslation = () => runPlainTranslation("azure/gpt-5-mini", 6000, azureSetters);
 
   // مسار مستقل تماماً عن ترجمة Groq (runTranslation أعلاه): يأخذ النص الأجنبي
   // الأصلي مباشرة (وليس ناتج ترجمة Groq) ويطلب من Gemini في استدعاء واحد أن
