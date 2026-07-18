@@ -63,9 +63,27 @@ function extractJsonFromLlmText(raw) {
 // لعرض شارة صغيرة توضح أي مزوّد ردّ فعلياً (خصوصاً بعد fallback تلقائي).
 function providerLabel(provider) {
   return (
-    { groq: "Groq", gemini: "Gemini", openrouter: "OpenRouter", lovable: "Lovable", cerebras: "Cerebras" }[
-      provider
-    ] || provider
+    {
+      groq: "Groq",
+      gemini: "Gemini",
+      openrouter: "OpenRouter",
+      lovable: "Lovable",
+      cerebras: "Cerebras",
+      azure: "Azure OpenAI",
+    }[provider] || provider
+  );
+}
+
+// لون/أيقونة كل مزوّد في سجل الترجمات المحفوظة وبطاقة العرض — مصدر واحد
+// للتناسق بدل تكرار سلسلة ternary لكل مزوّد جديد في كل مكان يُعرض فيه.
+function sourceMeta(source) {
+  return (
+    {
+      gemini:   { bg: "#fef3e2", color: "#92400E", icon: "🏛️" },
+      cerebras: { bg: "#dcfce7", color: "#0F766E", icon: "⚡" },
+      azure:    { bg: "#e0f2fe", color: "#0078D4", icon: "🔷" },
+      groq:     { bg: "#eff6ff", color: "#1e3a5f", icon: "🌐" },
+    }[source] || { bg: "#eff6ff", color: "#1e3a5f", icon: "🌐" }
   );
 }
 
@@ -2435,12 +2453,24 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
   const [translatorText, setTranslatorText]           = useState("");
   const [translatorFile, setTranslatorFile]           = useState(null);
   const [translatorFileName, setTranslatorFileName]   = useState("");
-  const [translatedResult, setTranslatedResult]       = useState("");
-  const [translatedResultProvider, setTranslatedResultProvider] = useState("");
-  const [keyPoints, setKeyPoints]                     = useState([]);
-  const [translatorLoading, setTranslatorLoading]     = useState(false);
+  // Groq وCerebras: كل مزوّد بحالته المستقلة تماماً (نتيجة/نقاط/بيانات وثيقة/تحميل) —
+  // بنفس نمط historicalAnalysis (Gemini) أدناه، لمنع أي تداخل بين البطاقتين.
+  const [groqResult, setGroqResult]                   = useState("");
+  const [groqProvider, setGroqProvider]                = useState("");
+  const [groqKeyPoints, setGroqKeyPoints]              = useState([]);
+  const [groqLoading, setGroqLoading]                  = useState(false);
+  const [groqDocMeta, setGroqDocMeta]                  = useState(null);
+  const [cerebrasResult, setCerebrasResult]            = useState("");
+  const [cerebrasProvider, setCerebrasProvider]        = useState("");
+  const [cerebrasKeyPoints, setCerebrasKeyPoints]      = useState([]);
+  const [cerebrasLoading, setCerebrasLoading]          = useState(false);
+  const [cerebrasDocMeta, setCerebrasDocMeta]          = useState(null);
+  const [azureResult, setAzureResult]                  = useState("");
+  const [azureProvider, setAzureProvider]              = useState("");
+  const [azureKeyPoints, setAzureKeyPoints]            = useState([]);
+  const [azureLoading, setAzureLoading]                = useState(false);
+  const [azureDocMeta, setAzureDocMeta]                = useState(null);
   const [translatorLang, setTranslatorLang]           = useState("إنجليزية");
-  const [translatorDocMeta, setTranslatorDocMeta]     = useState(null);
   const [historicalAnalysis, setHistoricalAnalysis]         = useState(null);
   const [historicalAnalysisLoading, setHistoricalAnalysisLoading] = useState(false);
   const [historicalAnalysisError, setHistoricalAnalysisError]     = useState("");
@@ -2462,11 +2492,13 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
   React.useEffect(() => { if (fmtHydratedRef.current)   syncFmtDebounced(customFormats);    }, [customFormats, syncFmtDebounced]);
 
 
+  // يشارك بطاقة/حالة Groq (كان يفعل ذلك أصلاً قبل فصل الحالتين) — يُستدعى من
+  // رفع ملف صورة/PDF ممسوح، وليس من زر Groq نفسه.
   const runImageOcrTranslation = async (imageDataUrls) => {
-    setTranslatorLoading(true);
-    setTranslatedResult("");
-    setKeyPoints([]);
-    setTranslatorDocMeta(null);
+    setGroqLoading(true);
+    setGroqResult("");
+    setGroqKeyPoints([]);
+    setGroqDocMeta(null);
     const prompt = `أنت أرشيفي متخصص في وثائق مكتب الهند البريطاني (IOR) المتعلقة بالخليج العربي خلال الحرب العالمية الثانية 1939-1945.
 هذه صور لوثيقة أرشيفية ممسوحة ضوئياً.
 المطلوب:
@@ -2507,9 +2539,10 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
       const jsonMatch = clean.match(/\{[\s\S]*\}/);
       const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : clean);
       if (parsed.ocrText) setTranslatorText(parsed.ocrText);
-      setTranslatedResult(parsed.translation || "لم يتم الحصول على الترجمة");
-      setKeyPoints(parsed.keyPoints || []);
-      setTranslatorDocMeta(parsed.docMeta || null);
+      setGroqResult(parsed.translation || "لم يتم الحصول على الترجمة");
+      setGroqProvider(data.provider || "");
+      setGroqKeyPoints(parsed.keyPoints || []);
+      setGroqDocMeta(parsed.docMeta || null);
       showNotif("✅ تم استخراج النص والترجمة");
     } catch (err) {
       showNotif(
@@ -2519,7 +2552,7 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
         "error"
       );
     }
-    setTranslatorLoading(false);
+    setGroqLoading(false);
   };
 
   const fileToDataUrl = (file) => new Promise((resolve, reject) => {
@@ -2612,14 +2645,17 @@ ${docsContext || "لم يُعثر على مصادر مطابقة"}
   // independent of the general AI_MODELS dropdown (the Gemini-button sibling
   // below is the only other exception — every other AI feature in the app
   // follows the dropdown).
-  const runPlainTranslation = async (model, maxTokens) => {
+  // setters هي حزمة الحالة الخاصة بمزوّد واحد فقط (Groq أو Cerebras) — كل استدعاء
+  // يكتب حصراً في حزمته، فلا يتأثر مزوّد بتشغيل الآخر (نفس استقلالية Gemini أدناه).
+  const runPlainTranslation = async (model, maxTokens, setters) => {
+    const { setResult, setProvider, setKeyPoints: setPoints, setDocMeta, setLoading } = setters;
     const textToTranslate = translatorText.trim();
     if (!textToTranslate) { showNotif("أدخل أو ألصق النص الأجنبي أولاً", "error"); return; }
-    setTranslatorLoading(true);
-    setTranslatedResult("");
-    setTranslatedResultProvider("");
-    setKeyPoints([]);
-    setTranslatorDocMeta(null);
+    setLoading(true);
+    setResult("");
+    setProvider("");
+    setPoints([]);
+    setDocMeta(null);
 
     const prompt = `أنت مترجم ومؤرخ أكاديمي متخصص في وثائق الأرشيف البريطاني (مكتب الهند) والأمريكي المتعلقة بالخليج العربي في الحرب العالمية الثانية 1939-1945.
 
@@ -2654,38 +2690,51 @@ ${textToTranslate.substring(0, 4000)}
     try {
       const data = await callLLM({ model, max_tokens: maxTokens, messages: [{ role: "user", content: prompt }] });
       raw = data.content?.map(c => c.text || "").join("") || "{}";
-      setTranslatedResultProvider(data.provider || "");
+      setProvider(data.provider || "");
     } catch (err) {
-      setTranslatedResult(
+      setResult(
         err?.isTokenLimitError
           ? err.message
           : err?.isNetworkError
             ? "حدث خطأ في الترجمة — تأكد من الاتصال بالإنترنت"
             : `تعذّر الاتصال بخدمة الترجمة: ${err?.message || err}`
       );
-      setKeyPoints([]);
-      setTranslatorLoading(false);
+      setPoints([]);
+      setLoading(false);
       return;
     }
 
     try {
       const clean = extractJsonFromLlmText(raw);
       const parsed = JSON.parse(clean);
-      setTranslatedResult(parsed.translation || "لم يتم الحصول على الترجمة");
-      setKeyPoints(parsed.keyPoints || []);
-      setTranslatorDocMeta(parsed.docMeta || null);
+      setResult(parsed.translation || "لم يتم الحصول على الترجمة");
+      setPoints(parsed.keyPoints || []);
+      setDocMeta(parsed.docMeta || null);
     } catch (err) {
       console.error("[runPlainTranslation] فشل تحليل رد الذكاء الاصطناعي. الرد الخام:", raw, err);
-      setTranslatedResult("فشل تحليل رد الذكاء الاصطناعي — حاول مرة أخرى أو قصّر النص");
-      setKeyPoints([]);
+      setResult("فشل تحليل رد الذكاء الاصطناعي — حاول مرة أخرى أو قصّر النص");
+      setPoints([]);
     }
-    setTranslatorLoading(false);
+    setLoading(false);
   };
 
-  const runTranslation = () => runPlainTranslation("groq/llama-3.3-70b-versatile", 4000);
+  const groqSetters = {
+    setResult: setGroqResult, setProvider: setGroqProvider,
+    setKeyPoints: setGroqKeyPoints, setDocMeta: setGroqDocMeta, setLoading: setGroqLoading,
+  };
+  const cerebrasSetters = {
+    setResult: setCerebrasResult, setProvider: setCerebrasProvider,
+    setKeyPoints: setCerebrasKeyPoints, setDocMeta: setCerebrasDocMeta, setLoading: setCerebrasLoading,
+  };
+  const azureSetters = {
+    setResult: setAzureResult, setProvider: setAzureProvider,
+    setKeyPoints: setAzureKeyPoints, setDocMeta: setAzureDocMeta, setLoading: setAzureLoading,
+  };
+  const runTranslation = () => runPlainTranslation("groq/llama-3.3-70b-versatile", 4000, groqSetters);
   // Cerebras' free-tier context is small (~8K tokens total) — a lower
   // max_tokens leaves more headroom before hitting that ceiling.
-  const runCerebrasTranslation = () => runPlainTranslation("cerebras/gemma-4-31b", 2000);
+  const runCerebrasTranslation = () => runPlainTranslation("cerebras/gemma-4-31b", 2000, cerebrasSetters);
+  const runAzureTranslation = () => runPlainTranslation("azure/gpt-5-mini", 2000, azureSetters);
 
   // مسار مستقل تماماً عن ترجمة Groq (runTranslation أعلاه): يأخذ النص الأجنبي
   // الأصلي مباشرة (وليس ناتج ترجمة Groq) ويطلب من Gemini في استدعاء واحد أن
@@ -2748,7 +2797,9 @@ ${textToAnalyze.substring(0, 4000)}
 
   const saveTranslation = (source = "groq") => {
     const isGemini = source === "gemini";
-    const content = isGemini ? historicalAnalysis?.translation : translatedResult;
+    const isCerebras = source === "cerebras";
+    const isAzure = source === "azure";
+    const content = isGemini ? historicalAnalysis?.translation : isCerebras ? cerebrasResult : isAzure ? azureResult : groqResult;
     if (!content) { showNotif("لا يوجد محتوى للحفظ", "error"); return; }
     const entry = {
       id:           Date.now() + Math.random(),
@@ -2757,10 +2808,10 @@ ${textToAnalyze.substring(0, 4000)}
       translation:  content,
       keyPoints:    isGemini
         ? (historicalAnalysis.keyThemes || []).map((t, i) => ({ rank: i + 1, point: t, chapter: "", importance: "" }))
-        : keyPoints,
+        : isCerebras ? cerebrasKeyPoints : isAzure ? azureKeyPoints : groqKeyPoints,
       docMeta:      isGemini
         ? { historicalContext: historicalAnalysis.historicalContext || "", researchSignificance: historicalAnalysis.researchSignificance || "" }
-        : translatorDocMeta,
+        : isCerebras ? cerebrasDocMeta : isAzure ? azureDocMeta : groqDocMeta,
       savedAt:      new Date().toLocaleDateString("ar-IQ"),
       source,
     };
@@ -5232,12 +5283,12 @@ ${docsContext}
                     )}
                   </div>
 
-                  {/* زر الترجمة عبر Groq */}
+                  {/* زر الترجمة عبر Groq — حالة/بطاقة/زر حفظ مستقلة تماماً عن Cerebras وGemini */}
                   <button
                     onClick={runTranslation}
-                    disabled={translatorLoading || !translatorText.trim()}
-                    style={{width:"100%",padding:"10px",borderRadius:8,background:translatorLoading||!translatorText.trim()?"#94a3b8":"#1e3a5f",color:"white",border:"none",cursor:translatorLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
-                    {translatorLoading ? "⏳ جاري الترجمة والتحليل..." : "🌐 ترجمة وتكشيف الوثيقة (Groq)"}
+                    disabled={groqLoading || !translatorText.trim()}
+                    style={{width:"100%",padding:"10px",borderRadius:8,background:groqLoading||!translatorText.trim()?"#94a3b8":"#1e3a5f",color:"white",border:"none",cursor:groqLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
+                    {groqLoading ? "⏳ جاري الترجمة والتحليل..." : "🌐 ترجمة وتكشيف الوثيقة (Groq)"}
                   </button>
 
                   {/* زر الترجمة والتحليل التاريخي عبر Gemini — مستقل تماماً عن Groq أعلاه */}
@@ -5248,92 +5299,93 @@ ${docsContext}
                     {historicalAnalysisLoading ? "⏳ جاري الترجمة والتحليل التاريخي..." : "🏛️ ترجمة وتحليل تاريخي (Gemini)"}
                   </button>
 
-                  {/* زر الترجمة عبر Cerebras — مستقل تماماً، بدون أي fallback */}
+                  {/* زر الترجمة عبر Cerebras — حالة/بطاقة/زر حفظ مستقلة تماماً عن Groq، بدون أي fallback */}
                   <button
                     onClick={runCerebrasTranslation}
-                    disabled={translatorLoading || !translatorText.trim()}
-                    style={{width:"100%",padding:"10px",borderRadius:8,marginTop:8,background:translatorLoading||!translatorText.trim()?"#94a3b8":"#0F766E",color:"white",border:"none",cursor:translatorLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
-                    {translatorLoading ? "⏳ جاري الترجمة والتحليل..." : "⚡ ترجم بـ Cerebras"}
+                    disabled={cerebrasLoading || !translatorText.trim()}
+                    style={{width:"100%",padding:"10px",borderRadius:8,marginTop:8,background:cerebrasLoading||!translatorText.trim()?"#94a3b8":"#0F766E",color:"white",border:"none",cursor:cerebrasLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
+                    {cerebrasLoading ? "⏳ جاري الترجمة والتحليل..." : "⚡ ترجم بـ Cerebras"}
+                  </button>
+
+                  {/* زر الترجمة عبر Azure OpenAI (GPT-5-mini) — حالة/بطاقة/زر حفظ مستقلة تماماً عن باقي المزوّدين */}
+                  <button
+                    onClick={runAzureTranslation}
+                    disabled={azureLoading || !translatorText.trim()}
+                    style={{width:"100%",padding:"10px",borderRadius:8,marginTop:8,background:azureLoading||!translatorText.trim()?"#94a3b8":"#0078D4",color:"white",border:"none",cursor:azureLoading||!translatorText.trim()?"not-allowed":"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600}}>
+                    {azureLoading ? "⏳ جاري الترجمة والتحليل..." : "🔷 ترجم بـ Azure OpenAI"}
                   </button>
                 </div>
-
-                {/* ===== بيانات الوثيقة المستنتجة ===== */}
-                {translatorDocMeta && (
-                  <div style={{background:"white",borderRadius:12,padding:16,border:"0.5px solid #e2e8f0"}}>
-                    <div style={{fontWeight:600,fontSize:12,marginBottom:10,color:"#475569"}}>📋 بيانات الوثيقة المستنتجة تلقائياً</div>
-                    <div style={{display:"grid",gap:6}}>
-                      {[
-                        {label:"العنوان المستنتج", value:translatorDocMeta.estimatedTitle},
-                        {label:"المؤلف / الجهة",   value:translatorDocMeta.author},
-                        {label:"التاريخ",           value:translatorDocMeta.date},
-                        {label:"نوع الوثيقة",       value:translatorDocMeta.docType},
-                        {label:"الفصل المقترح",     value:translatorDocMeta.suggestedChapter},
-                        {label:"السياق التاريخي",   value:translatorDocMeta.historicalContext},
-                        {label:"أهمية البحث",       value:translatorDocMeta.researchSignificance},
-                      ].map(f=>f.value&&(
-                        <div key={f.label} style={{display:"flex",gap:6}}>
-                          <span style={{fontSize:10,color:"#94a3b8",minWidth:100,flexShrink:0}}>{f.label}</span>
-                          <span style={{fontSize:12,fontWeight:500,flex:1}}>{f.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div style={{display:"flex",gap:8,marginTop:12}}>
-                      <button
-                        onClick={()=>saveTranslation()}
-                        style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
-                        💾 حفظ في سجل الترجمات
-                      </button>
-                      <button
-                        onClick={()=>{
-                          setAddForm(p=>({...p,title:translatorDocMeta.estimatedTitle||"",author:translatorDocMeta.author||"",year:translatorDocMeta.date||"",notes:translatorText.substring(0,200)}));
-                          setPage("add");
-                          showNotif("تم نقل البيانات لنموذج الإضافة — أكمل البيانات");
-                        }}
-                        style={{padding:"6px 14px",borderRadius:7,background:"#eff6ff",color:"#3B82F6",border:"0.5px solid #bfdbfe",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
-                        ➕ إضافة للأرشيف
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
 
-              {/* ===== العمود الأيسر: النتائج ===== */}
+              {/* ===== العمود الأيسر: النتائج — كل مزوّد ببطاقته وحالته وزر حفظه المستقل ===== */}
               <div>
-                {/* حالة التحميل */}
-                {translatorLoading && (
-                  <div style={{background:"white",borderRadius:12,padding:40,border:"0.5px solid #e2e8f0",textAlign:"center"}}>
+                {/* ===== Groq ===== */}
+                {groqLoading && (
+                  <div style={{background:"white",borderRadius:12,padding:40,border:"0.5px solid #e2e8f0",textAlign:"center",marginBottom:14}}>
                     <div style={{fontSize:40,marginBottom:12}}>🌐</div>
-                    <div style={{fontWeight:600,color:"#1e3a5f",marginBottom:6}}>جاري الترجمة...</div>
+                    <div style={{fontWeight:600,color:"#1e3a5f",marginBottom:6}}>جاري الترجمة عبر Groq...</div>
                     <div style={{fontSize:12,color:"#64748b"}}>يترجم النص ويستخرج النقاط الجوهرية بلغة تاريخية رصينة</div>
                   </div>
                 )}
 
-                {/* الترجمة */}
-                {translatedResult && !translatorLoading && (
+                {groqResult && !groqLoading && (
                   <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
                     <div style={{background:"#1e3a5f",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div style={{fontWeight:600,fontSize:13}}>🌐 الترجمة العربية الرصينة</div>
+                      <div style={{fontWeight:600,fontSize:13}}>🌐 الترجمة العربية الرصينة (Groq)</div>
                       <button
-                        onClick={()=>{navigator.clipboard.writeText(translatedResult).then(()=>showNotif("✅ تم نسخ الترجمة"));}}
+                        onClick={()=>{navigator.clipboard.writeText(groqResult).then(()=>showNotif("✅ تم نسخ الترجمة"));}}
                         style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                         📋 نسخ
                       </button>
                     </div>
                     <div style={{padding:16,maxHeight:320,overflowY:"auto"}}>
-                      <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{translatedResult}</p>
-                      {translatedResultProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تمت الترجمة بواسطة {providerLabel(translatedResultProvider)}</div>}
+                      <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{groqResult}</p>
+                      {groqProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تمت الترجمة بواسطة {providerLabel(groqProvider)}</div>}
+                      {groqDocMeta && (
+                        <div style={{marginTop:12,paddingTop:12,borderTop:"0.5px solid #f1f5f9",display:"grid",gap:6}}>
+                          {[
+                            {label:"العنوان المستنتج", value:groqDocMeta.estimatedTitle},
+                            {label:"المؤلف / الجهة",   value:groqDocMeta.author},
+                            {label:"التاريخ",           value:groqDocMeta.date},
+                            {label:"نوع الوثيقة",       value:groqDocMeta.docType},
+                            {label:"الفصل المقترح",     value:groqDocMeta.suggestedChapter},
+                          ].map(f=>f.value&&(
+                            <div key={f.label} style={{display:"flex",gap:6}}>
+                              <span style={{fontSize:10,color:"#94a3b8",minWidth:100,flexShrink:0}}>{f.label}</span>
+                              <span style={{fontSize:12,fontWeight:500,flex:1}}>{f.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        <button
+                          onClick={()=>saveTranslation("groq")}
+                          style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                          💾 حفظ في سجل الترجمات
+                        </button>
+                        {groqDocMeta && (
+                          <button
+                            onClick={()=>{
+                              setAddForm(p=>({...p,title:groqDocMeta.estimatedTitle||"",author:groqDocMeta.author||"",year:groqDocMeta.date||"",notes:translatorText.substring(0,200)}));
+                              setPage("add");
+                              showNotif("تم نقل البيانات لنموذج الإضافة — أكمل البيانات");
+                            }}
+                            style={{padding:"6px 14px",borderRadius:7,background:"#eff6ff",color:"#3B82F6",border:"0.5px solid #bfdbfe",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                            ➕ إضافة للأرشيف
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* النقاط الجوهرية */}
-                {keyPoints.length>0 && !translatorLoading && (
+                {groqKeyPoints.length>0 && !groqLoading && (
                   <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
                     <div style={{background:"#7C3AED",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                      <div style={{fontWeight:600,fontSize:13}}>⭐ النقاط الجوهرية والأفكار المفتاحية</div>
+                      <div style={{fontWeight:600,fontSize:13}}>⭐ النقاط الجوهرية والأفكار المفتاحية (Groq)</div>
                       <button
                         onClick={()=>{
-                          const text = keyPoints.map((p,i)=>`${i+1}. [${p.importance}] ${p.point}\n   الفصل: ${p.chapter}`).join("\n\n");
+                          const text = groqKeyPoints.map((p,i)=>`${i+1}. [${p.importance}] ${p.point}\n   الفصل: ${p.chapter}`).join("\n\n");
                           navigator.clipboard.writeText(text).then(()=>showNotif("✅ تم نسخ النقاط"));
                         }}
                         style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
@@ -5341,8 +5393,188 @@ ${docsContext}
                       </button>
                     </div>
                     <div style={{padding:14}}>
-                      {keyPoints.map((kp,i)=>(
-                        <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:i<keyPoints.length-1?"0.5px solid #f1f5f9":"none",alignItems:"flex-start"}}>
+                      {groqKeyPoints.map((kp,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:i<groqKeyPoints.length-1?"0.5px solid #f1f5f9":"none",alignItems:"flex-start"}}>
+                          <div style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,flexShrink:0,minWidth:28,textAlign:"center"}}>{kp.rank}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:500,lineHeight:1.6,marginBottom:3}}>{kp.point}</div>
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <span style={{fontSize:10,background:"#eff6ff",color:"#3B82F6",borderRadius:4,padding:"1px 6px"}}>📖 {kp.chapter}</span>
+                              <span style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:600}}>{kp.importance}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ===== Cerebras — بطاقة/حالة/زر حفظ مستقلة تماماً عن Groq ===== */}
+                {cerebrasLoading && (
+                  <div style={{background:"white",borderRadius:12,padding:40,border:"0.5px solid #e2e8f0",textAlign:"center",marginBottom:14}}>
+                    <div style={{fontSize:40,marginBottom:12}}>⚡</div>
+                    <div style={{fontWeight:600,color:"#0F766E",marginBottom:6}}>جاري الترجمة عبر Cerebras...</div>
+                    <div style={{fontSize:12,color:"#64748b"}}>يترجم النص ويستخرج النقاط الجوهرية بلغة تاريخية رصينة</div>
+                  </div>
+                )}
+
+                {cerebrasResult && !cerebrasLoading && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
+                    <div style={{background:"#0F766E",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:600,fontSize:13}}>⚡ الترجمة العربية الرصينة (Cerebras)</div>
+                      <button
+                        onClick={()=>{navigator.clipboard.writeText(cerebrasResult).then(()=>showNotif("✅ تم نسخ الترجمة"));}}
+                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                        📋 نسخ
+                      </button>
+                    </div>
+                    <div style={{padding:16,maxHeight:320,overflowY:"auto"}}>
+                      <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{cerebrasResult}</p>
+                      {cerebrasProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تمت الترجمة بواسطة {providerLabel(cerebrasProvider)}</div>}
+                      {cerebrasDocMeta && (
+                        <div style={{marginTop:12,paddingTop:12,borderTop:"0.5px solid #f1f5f9",display:"grid",gap:6}}>
+                          {[
+                            {label:"العنوان المستنتج", value:cerebrasDocMeta.estimatedTitle},
+                            {label:"المؤلف / الجهة",   value:cerebrasDocMeta.author},
+                            {label:"التاريخ",           value:cerebrasDocMeta.date},
+                            {label:"نوع الوثيقة",       value:cerebrasDocMeta.docType},
+                            {label:"الفصل المقترح",     value:cerebrasDocMeta.suggestedChapter},
+                          ].map(f=>f.value&&(
+                            <div key={f.label} style={{display:"flex",gap:6}}>
+                              <span style={{fontSize:10,color:"#94a3b8",minWidth:100,flexShrink:0}}>{f.label}</span>
+                              <span style={{fontSize:12,fontWeight:500,flex:1}}>{f.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        <button
+                          onClick={()=>saveTranslation("cerebras")}
+                          style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                          💾 حفظ في سجل الترجمات
+                        </button>
+                        {cerebrasDocMeta && (
+                          <button
+                            onClick={()=>{
+                              setAddForm(p=>({...p,title:cerebrasDocMeta.estimatedTitle||"",author:cerebrasDocMeta.author||"",year:cerebrasDocMeta.date||"",notes:translatorText.substring(0,200)}));
+                              setPage("add");
+                              showNotif("تم نقل البيانات لنموذج الإضافة — أكمل البيانات");
+                            }}
+                            style={{padding:"6px 14px",borderRadius:7,background:"#eff6ff",color:"#3B82F6",border:"0.5px solid #bfdbfe",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                            ➕ إضافة للأرشيف
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {cerebrasKeyPoints.length>0 && !cerebrasLoading && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
+                    <div style={{background:"#7C3AED",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:600,fontSize:13}}>⭐ النقاط الجوهرية والأفكار المفتاحية (Cerebras)</div>
+                      <button
+                        onClick={()=>{
+                          const text = cerebrasKeyPoints.map((p,i)=>`${i+1}. [${p.importance}] ${p.point}\n   الفصل: ${p.chapter}`).join("\n\n");
+                          navigator.clipboard.writeText(text).then(()=>showNotif("✅ تم نسخ النقاط"));
+                        }}
+                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                        📋 نسخ
+                      </button>
+                    </div>
+                    <div style={{padding:14}}>
+                      {cerebrasKeyPoints.map((kp,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:i<cerebrasKeyPoints.length-1?"0.5px solid #f1f5f9":"none",alignItems:"flex-start"}}>
+                          <div style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,flexShrink:0,minWidth:28,textAlign:"center"}}>{kp.rank}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:13,fontWeight:500,lineHeight:1.6,marginBottom:3}}>{kp.point}</div>
+                            <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                              <span style={{fontSize:10,background:"#eff6ff",color:"#3B82F6",borderRadius:4,padding:"1px 6px"}}>📖 {kp.chapter}</span>
+                              <span style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:4,padding:"1px 6px",fontSize:10,fontWeight:600}}>{kp.importance}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ===== Azure OpenAI (GPT-5-mini) — بطاقة/حالة/زر حفظ مستقلة تماماً عن باقي المزوّدين ===== */}
+                {azureLoading && (
+                  <div style={{background:"white",borderRadius:12,padding:40,border:"0.5px solid #e2e8f0",textAlign:"center",marginBottom:14}}>
+                    <div style={{fontSize:40,marginBottom:12}}>🔷</div>
+                    <div style={{fontWeight:600,color:"#0078D4",marginBottom:6}}>جاري الترجمة عبر Azure OpenAI...</div>
+                    <div style={{fontSize:12,color:"#64748b"}}>يترجم النص ويستخرج النقاط الجوهرية بلغة تاريخية رصينة</div>
+                  </div>
+                )}
+
+                {azureResult && !azureLoading && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
+                    <div style={{background:"#0078D4",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:600,fontSize:13}}>🔷 الترجمة العربية الرصينة (Azure OpenAI)</div>
+                      <button
+                        onClick={()=>{navigator.clipboard.writeText(azureResult).then(()=>showNotif("✅ تم نسخ الترجمة"));}}
+                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                        📋 نسخ
+                      </button>
+                    </div>
+                    <div style={{padding:16,maxHeight:320,overflowY:"auto"}}>
+                      <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{azureResult}</p>
+                      {azureProvider && <div style={{fontSize:10,color:"#94a3b8",marginTop:8}}>تمت الترجمة بواسطة {providerLabel(azureProvider)}</div>}
+                      {azureDocMeta && (
+                        <div style={{marginTop:12,paddingTop:12,borderTop:"0.5px solid #f1f5f9",display:"grid",gap:6}}>
+                          {[
+                            {label:"العنوان المستنتج", value:azureDocMeta.estimatedTitle},
+                            {label:"المؤلف / الجهة",   value:azureDocMeta.author},
+                            {label:"التاريخ",           value:azureDocMeta.date},
+                            {label:"نوع الوثيقة",       value:azureDocMeta.docType},
+                            {label:"الفصل المقترح",     value:azureDocMeta.suggestedChapter},
+                          ].map(f=>f.value&&(
+                            <div key={f.label} style={{display:"flex",gap:6}}>
+                              <span style={{fontSize:10,color:"#94a3b8",minWidth:100,flexShrink:0}}>{f.label}</span>
+                              <span style={{fontSize:12,fontWeight:500,flex:1}}>{f.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{display:"flex",gap:8,marginTop:12}}>
+                        <button
+                          onClick={()=>saveTranslation("azure")}
+                          style={{padding:"6px 14px",borderRadius:7,background:"#10B981",color:"white",border:"none",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                          💾 حفظ في سجل الترجمات
+                        </button>
+                        {azureDocMeta && (
+                          <button
+                            onClick={()=>{
+                              setAddForm(p=>({...p,title:azureDocMeta.estimatedTitle||"",author:azureDocMeta.author||"",year:azureDocMeta.date||"",notes:translatorText.substring(0,200)}));
+                              setPage("add");
+                              showNotif("تم نقل البيانات لنموذج الإضافة — أكمل البيانات");
+                            }}
+                            style={{padding:"6px 14px",borderRadius:7,background:"#eff6ff",color:"#3B82F6",border:"0.5px solid #bfdbfe",cursor:"pointer",fontFamily:"inherit",fontSize:12}}>
+                            ➕ إضافة للأرشيف
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {azureKeyPoints.length>0 && !azureLoading && (
+                  <div style={{background:"white",borderRadius:12,border:"0.5px solid #e2e8f0",marginBottom:14,overflow:"hidden"}}>
+                    <div style={{background:"#7C3AED",color:"white",padding:"10px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontWeight:600,fontSize:13}}>⭐ النقاط الجوهرية والأفكار المفتاحية (Azure OpenAI)</div>
+                      <button
+                        onClick={()=>{
+                          const text = azureKeyPoints.map((p,i)=>`${i+1}. [${p.importance}] ${p.point}\n   الفصل: ${p.chapter}`).join("\n\n");
+                          navigator.clipboard.writeText(text).then(()=>showNotif("✅ تم نسخ النقاط"));
+                        }}
+                        style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
+                        📋 نسخ
+                      </button>
+                    </div>
+                    <div style={{padding:14}}>
+                      {azureKeyPoints.map((kp,i)=>(
+                        <div key={i} style={{display:"flex",gap:10,padding:"10px 0",borderBottom:i<azureKeyPoints.length-1?"0.5px solid #f1f5f9":"none",alignItems:"flex-start"}}>
                           <div style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,flexShrink:0,minWidth:28,textAlign:"center"}}>{kp.rank}</div>
                           <div style={{flex:1}}>
                             <div style={{fontSize:13,fontWeight:500,lineHeight:1.6,marginBottom:3}}>{kp.point}</div>
@@ -5430,7 +5662,7 @@ ${docsContext}
                 )}
 
                 {/* رسالة ترحيبية */}
-                {!translatorLoading && !translatedResult && !historicalAnalysisLoading && !historicalAnalysis && (
+                {!groqLoading && !groqResult && !cerebrasLoading && !cerebrasResult && !azureLoading && !azureResult && !historicalAnalysisLoading && !historicalAnalysis && (
                   <div style={{background:"white",borderRadius:12,padding:36,border:"0.5px solid #e2e8f0",textAlign:"center"}}>
                     <div style={{fontSize:40,marginBottom:10}}>🌐</div>
                     <div style={{fontWeight:600,fontSize:14,marginBottom:6,color:"#1e3a5f"}}>بوابة الترجمة الأرشيفية</div>
@@ -5459,7 +5691,13 @@ ${docsContext}
                         {tr.docMeta?.docType && <span>📄 {tr.docMeta.docType}</span>}
                         <span>💾 {tr.savedAt}</span>
                         <span>⭐ {tr.keyPoints?.length||0} نقطة جوهرية</span>
-                        <span>{tr.source==="gemini" ? "🏛️ Gemini" : "🌐 Groq"}</span>
+                        <span style={{
+                          background: sourceMeta(tr.source).bg,
+                          color:      sourceMeta(tr.source).color,
+                          borderRadius:4, padding:"1px 6px", fontWeight:600,
+                        }}>
+                          {sourceMeta(tr.source).icon} {providerLabel(tr.source || "groq")}
+                        </span>
                       </div>
                       {tr.originalText && (
                         <div style={{fontSize:10,color:"#94a3b8",marginTop:3,fontFamily:"monospace",direction:"ltr",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
@@ -5469,7 +5707,7 @@ ${docsContext}
                     </div>
                     <div style={{display:"flex",gap:4,flexShrink:0}}>
                       <button
-                        onClick={()=>{ setSelectedTranslation(tr); setTranslatedResult(tr.translation); setKeyPoints(tr.keyPoints||[]); setTranslatorDocMeta(tr.docMeta); setTranslatorText(""); setTranslatorFileName(tr.fileName||""); }}
+                        onClick={()=>setSelectedTranslation(tr)}
                         style={{padding:"4px 10px",borderRadius:6,background:"#eff6ff",color:"#3B82F6",border:"none",cursor:"pointer",fontSize:11,fontFamily:"inherit"}}>
                         عرض
                       </button>
@@ -5481,6 +5719,81 @@ ${docsContext}
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* ===== نافذة عرض ترجمة محفوظة — للقراءة فقط، بلا أي إعادة تنفيذ ===== */}
+            {selectedTranslation && (
+              <div
+                onClick={()=>setSelectedTranslation(null)}
+                style={{position:"fixed",inset:0,background:"rgba(15,23,42,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000,padding:20}}>
+                <div
+                  onClick={e=>e.stopPropagation()}
+                  style={{background:"white",borderRadius:12,maxWidth:640,width:"100%",maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+                  <div style={{
+                    background: sourceMeta(selectedTranslation.source).color,
+                    color:"white",padding:"14px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0,
+                  }}>
+                    <div style={{fontWeight:600,fontSize:14}}>
+                      {selectedTranslation.docMeta?.estimatedTitle || selectedTranslation.fileName}
+                    </div>
+                    <button
+                      onClick={()=>setSelectedTranslation(null)}
+                      style={{padding:"3px 10px",borderRadius:5,background:"rgba(255,255,255,0.2)",border:"none",color:"white",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
+                      ✕ إغلاق
+                    </button>
+                  </div>
+                  <div style={{padding:20,overflowY:"auto"}}>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap",fontSize:11,color:"#64748b",marginBottom:14}}>
+                      <span style={{
+                        background: sourceMeta(selectedTranslation.source).bg,
+                        color:      sourceMeta(selectedTranslation.source).color,
+                        borderRadius:4, padding:"1px 6px", fontWeight:600,
+                      }}>
+                        {providerLabel(selectedTranslation.source || "groq")}
+                      </span>
+                      {selectedTranslation.docMeta?.author && <span>👤 {selectedTranslation.docMeta.author}</span>}
+                      {selectedTranslation.docMeta?.date && <span>📅 {selectedTranslation.docMeta.date}</span>}
+                      {selectedTranslation.docMeta?.docType && <span>📄 {selectedTranslation.docMeta.docType}</span>}
+                      <span>💾 {selectedTranslation.savedAt}</span>
+                    </div>
+
+                    <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:5}}>الترجمة</div>
+                    <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:"0 0 16px",direction:"rtl"}}>
+                      {selectedTranslation.translation}
+                    </p>
+
+                    {selectedTranslation.source==="gemini" ? (
+                      <>
+                        {selectedTranslation.docMeta?.historicalContext && (
+                          <div style={{marginBottom:14}}>
+                            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:5}}>السياق التاريخي</div>
+                            <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{selectedTranslation.docMeta.historicalContext}</p>
+                          </div>
+                        )}
+                        {selectedTranslation.docMeta?.researchSignificance && (
+                          <div>
+                            <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:5}}>أهمية الوثيقة ضمن نطاق البحث</div>
+                            <p style={{fontSize:13,lineHeight:2,color:"#1e293b",margin:0,direction:"rtl"}}>{selectedTranslation.docMeta.researchSignificance}</p>
+                          </div>
+                        )}
+                      </>
+                    ) : selectedTranslation.keyPoints?.length>0 && (
+                      <>
+                        <div style={{fontSize:11,fontWeight:700,color:"#475569",marginBottom:5}}>النقاط الجوهرية</div>
+                        {selectedTranslation.keyPoints.map((kp,i)=>(
+                          <div key={i} style={{display:"flex",gap:10,padding:"8px 0",borderBottom:i<selectedTranslation.keyPoints.length-1?"0.5px solid #f1f5f9":"none",alignItems:"flex-start"}}>
+                            <div style={{background:pBg(kp.importance),color:pColor(kp.importance),borderRadius:5,padding:"2px 7px",fontSize:10,fontWeight:700,flexShrink:0,minWidth:28,textAlign:"center"}}>{kp.rank}</div>
+                            <div style={{flex:1}}>
+                              <div style={{fontSize:13,fontWeight:500,lineHeight:1.6,marginBottom:3}}>{kp.point}</div>
+                              {kp.chapter && <span style={{fontSize:10,background:"#eff6ff",color:"#3B82F6",borderRadius:4,padding:"1px 6px"}}>📖 {kp.chapter}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
           </div>

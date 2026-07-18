@@ -6,12 +6,12 @@
 
 export const AI_MODELS = [
   { id: "groq/llama-3.3-70b-versatile", label: "Groq — Llama 3.3 70B (مفتاحك الخاص)" },
+  { id: "azure/gpt-5-mini", label: "Azure OpenAI — GPT-5-mini (مفتاحك الخاص)" },
   { id: "cerebras/gemma-4-31b", label: "Cerebras — سرعة فائقة (مجاني)" },
   { id: "openrouter/meta-llama/llama-3.3-70b-instruct:free", label: "OpenRouter — Llama 3.3 70B (مجاني)" },
   { id: "google/gemini-3-flash-preview", label: "Lovable Cloud — Gemini 3 Flash" },
   { id: "gemini/gemini-2.5-flash", label: "Gemini — دقة عالية (2.5 Flash، حصة يومية محدودة)" },
   { id: "gemini/gemini-2.5-flash-lite", label: "Gemini — سرعة عالية (2.5 Flash Lite، حصة أعلى بكثير)" },
-  { id: "azure-openai/gpt-4o-mini", label: "Azure OpenAI — GPT-5 Mini" },
 ];
 
 export const MODEL_STORAGE_KEY = "acadarchiv_ai_model";
