@@ -46,6 +46,25 @@ function toGeminiContents(messages: ChatMsg[]) {
     });
 }
 
+// Azure OpenAI's newer unified Responses API (v1/responses, used by reasoning
+// models like gpt-5-mini) takes "input" instead of "messages" — an array of
+// {role, content} turns, with the system prompt broken out into a separate
+// top-level "instructions" field (same shape choice as Gemini's
+// systemInstruction above). Prior assistant turns being replayed as history
+// use content type "output_text" per Microsoft's documented shape; text-only
+// here since Azure isn't used for the image/PDF OCR path (see allowMultimodal
+// below).
+function toAzureResponsesInput(messages: ChatMsg[]) {
+  return (messages || [])
+    .filter((m) => m.role !== "system")
+    .map((m) => {
+      const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      return m.role === "assistant"
+        ? { role: "assistant", content: [{ type: "output_text", text }] }
+        : { role: "user", content: text };
+    });
+}
+
 function detectProvider(model: string, forceProvider?: string): Provider {
   if (forceProvider === "lovable") return "lovable";
   if (forceProvider === "groq") return "groq";
@@ -99,15 +118,21 @@ export const Route = createFileRoute("/api/ai-chat")({
                 );
               }
 
-              const azUrl = `${azEndpoint}/openai/deployments/${encodeURIComponent(azDeployment)}/chat/completions?api-version=2024-08-01-preview`;
+              // Unified v1 Responses API: no api-version query param (versioning is
+              // implicit in the /v1/ path), deployment goes in the "model" body field
+              // rather than the URL, "input"/"instructions" replace "messages", and
+              // "max_output_tokens" replaces "max_tokens".
+              const azUrl = `${azEndpoint}/openai/v1/responses`;
               let azResp: Response;
               try {
                 azResp = await fetch(azUrl, {
                   method: "POST",
                   headers: { "Content-Type": "application/json", "api-key": azKey },
                   body: JSON.stringify({
-                    messages: toOpenAIMessages(body.messages || [], body.system, false),
-                    max_completion_tokens: body.max_tokens ?? 1024,
+                    model: azDeployment,
+                    ...(body.system ? { instructions: body.system } : {}),
+                    input: toAzureResponsesInput(body.messages || []),
+                    max_output_tokens: body.max_tokens ?? 1024,
                   }),
                 });
               } catch (netErr) {
@@ -134,7 +159,22 @@ export const Route = createFileRoute("/api/ai-chat")({
               }
 
               const azData = await azResp.json();
-              const text = azData?.choices?.[0]?.message?.content || "";
+              // "output_text" is the Responses API's flat convenience field; fall back to
+              // walking the structured "output" array (message items only — tool/function
+              // calls aren't used here) in case it's ever absent.
+              const text =
+                azData?.output_text ||
+                (Array.isArray(azData?.output)
+                  ? azData.output
+                      .filter((o: { type?: string }) => o?.type === "message")
+                      .flatMap((o: { content?: { type?: string; text?: string }[] }) =>
+                        (o.content || [])
+                          .filter((c) => c?.type === "output_text")
+                          .map((c) => c.text || ""),
+                      )
+                      .join("")
+                  : "") ||
+                "";
               return new Response(JSON.stringify({ content: [{ type: "text", text }], provider: "azure" }), {
                 headers: { "Content-Type": "application/json" },
               });
